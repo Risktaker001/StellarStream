@@ -393,6 +393,54 @@ fn test_permit_stream_fails_if_deadline_passed() {
     assert!(result.is_err());
 }
 
+// ── Issue #396 — Dust threshold tests ────────────────────────────────────────
+
+#[test]
+fn test_get_min_value_returns_default() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let (_, v2_client) = setup_v2(&env, &admin);
+    let token = Address::generate(&env);
+
+    // Default is 10 XLM = 100_000_000 stroops
+    assert_eq!(v2_client.get_min_value(&token), 100_000_000i128);
+}
+
+#[test]
+fn test_set_min_value_overrides_default() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let (_, v2_client) = setup_v2(&env, &admin);
+    let token = Address::generate(&env);
+
+    v2_client.set_min_value(&token, &500_000_000i128);
+    assert_eq!(v2_client.get_min_value(&token), 500_000_000i128);
+}
+
+#[test]
+fn test_permit_stream_fails_below_dust_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 0);
+
+    let admin = Address::generate(&env);
+    let receiver = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_id, _) = create_token(&env, &token_admin);
+    let (_, v2_client) = setup_v2(&env, &admin);
+
+    let pubkey = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
+    let bad_sig = soroban_sdk::BytesN::from_array(&env, &[0u8; 64]);
+
+    // total_amount = 1 stroop — below the 100_000_000 default
+    let result = v2_client.try_create_stream_with_signature(
+        &pubkey, &receiver, &token_id, &1i128, &0u64, &200u64, &0u64,
+        &9999u64,
+        &bad_sig,
+    );
+    assert!(result.is_err());
 #[test]
 fn test_get_v2_protocol_health_updates_correctly() {
     let env = Env::default();

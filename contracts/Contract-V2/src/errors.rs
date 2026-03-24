@@ -11,4 +11,5 @@ pub enum ContractError {
     InvalidSignature = 5,
     ExpiredDeadline = 6,
     InvalidNonce = 7,
+    BelowDustThreshold = 8,
 }

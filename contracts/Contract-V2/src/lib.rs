@@ -34,6 +34,22 @@ impl Contract {
     }
 
     // ----------------------------------------------------------------
+    // Issue #396 — Dust Threshold
+    // ----------------------------------------------------------------
+
+    /// Return the minimum stream amount for `asset` (default: 10 XLM).
+    pub fn get_min_value(env: Env, asset: Address) -> i128 {
+        storage::get_min_value(&env, &asset)
+    }
+
+    /// Override the minimum for a specific asset. Admin-only.
+    pub fn set_min_value(env: Env, asset: Address, min: i128) -> Result<(), ContractError> {
+        storage::get_admin(&env).require_auth();
+        storage::set_min_value(&env, &asset, min);
+        Ok(())
+    }
+
+    // ----------------------------------------------------------------
     // Issue #359 — Migration Bridge
     // ----------------------------------------------------------------
 
@@ -147,6 +163,11 @@ impl Contract {
         // ── Guard: deadline ──────────────────────────────────────────
         if now > deadline {
             return Err(ContractError::ExpiredDeadline);
+        }
+
+        // ── Guard: dust threshold ─────────────────────────────────────
+        if total_amount < storage::get_min_value(&env, &token) {
+            return Err(ContractError::BelowDustThreshold);
         }
 
         // ── Guard: nonce ─────────────────────────────────────────────
