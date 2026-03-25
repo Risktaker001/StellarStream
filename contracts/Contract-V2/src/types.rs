@@ -64,6 +64,17 @@ pub struct StreamMigratedEvent {
 
 #[contracttype]
 #[derive(Clone, Debug)]
+pub enum MigrationEvent {
+    Migrated {
+        v1_id: u64,
+        v2_id: u64,
+        sender: Address,
+        remaining_balance: i128,
+    },
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
 pub struct StreamCreatedV2Event {
     pub stream_id: u64,
     pub sender: Address,
@@ -73,6 +84,16 @@ pub struct StreamCreatedV2Event {
     pub start_time: u64,
     pub cliff_time: u64,
     pub end_time: u64,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct BatchStreamsCreatedEvent {
+    pub stream_ids: Vec<u64>,
+    pub sender: Address,
+    pub total_streams: u32,
+    pub total_amount: i128,
     pub timestamp: u64,
 }
 

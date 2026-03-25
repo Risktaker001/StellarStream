@@ -853,83 +853,157 @@ fn test_geometric_rate_unlock_math() {
     assert_eq!(token_client.balance(&receiver), 100_000_000);
 }
 
-// ── top_up tests ─────────────────────────────────────────────────────────────
-
-fn make_stream(env: &Env) -> (ContractClient, Address, Address, u64) {
+#[test]
+fn test_create_batch_streams_success() {
+    let env = Env::default();
     env.mock_all_auths();
-    let admin = Address::generate(env);
-    let sender = Address::generate(env);
-    let receiver = Address::generate(env);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(env, &contract_id);
-    client.init(&admin);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let receiver1 = Address::generate(&env);
+    let receiver2 = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_id, token_client, _) = create_token(&env, &token_admin);
 
-    let (token_addr, _, asset_admin) = create_token(env, &admin);
-    asset_admin.mint(&sender, &400_000_000);
+    // Mint tokens to sender
+    token_client.mint(&sender, &1_000_000_000);
 
-    env.ledger().with_mut(|li| li.timestamp = 100);
+    let (_, v2_client) = setup_v2(&env, &admin);
 
-    let stream_id = client.create_stream(&StreamArgs {
-        sender: sender.clone(),
-        receiver: receiver.clone(),
-        token: token_addr,
-        total_amount: 100_000_000,
-        start_time: 100,
-        cliff_time: 100,
-        end_time: 200,
-        step_duration: 0,
-        multiplier_bps: 0,
-    });
+    // Create batch of 2 streams
+    let streams = vec![
+        &env,
+        StreamArgs {
+            sender: sender.clone(),
+            receiver: receiver1.clone(),
+            token: token_id.clone(),
+            total_amount: 100_000_000,
+            start_time: 0,
+            cliff_time: 0,
+            end_time: 100,
+            step_duration: 0,
+            multiplier_bps: 0,
+        },
+        StreamArgs {
+            sender: sender.clone(),
+            receiver: receiver2.clone(),
+            token: token_id.clone(),
+            total_amount: 200_000_000,
+            start_time: 0,
+            cliff_time: 0,
+            end_time: 200,
+            step_duration: 0,
+            multiplier_bps: 0,
+        },
+    ];
 
-    (client, sender, receiver, stream_id)
+    let stream_ids = v2_client.create_batch_streams(&streams);
+
+    // Should return 2 stream IDs
+    assert_eq!(stream_ids.len(), 2);
+    assert_eq!(stream_ids.get(0).unwrap(), 0);
+    assert_eq!(stream_ids.get(1).unwrap(), 1);
+
+    // Check streams were created
+    let stream1 = v2_client.get_stream(&0).unwrap();
+    assert_eq!(stream1.sender, sender);
+    assert_eq!(stream1.receiver, receiver1);
+    assert_eq!(stream1.total_amount, 100_000_000);
+
+    let stream2 = v2_client.get_stream(&1).unwrap();
+    assert_eq!(stream2.sender, sender);
+    assert_eq!(stream2.receiver, receiver2);
+    assert_eq!(stream2.total_amount, 200_000_000);
+
+    // Check tokens were transferred
+    assert_eq!(token_client.balance(&sender), 700_000_000); // 1e9 - 3e8
+    assert_eq!(token_client.balance(&v2_client.contract_id), 300_000_000);
 }
 
 #[test]
-fn test_top_up_extends_end_time() {
+fn test_create_batch_streams_max_limit() {
     let env = Env::default();
-    let (client, sender, _, stream_id) = make_stream(&env);
+    env.mock_all_auths();
 
-    // At t=150 (halfway through 100..200), top up with 100_000_000 more.
-    env.ledger().with_mut(|li| li.timestamp = 150);
-    client.top_up(&stream_id, &sender, &100_000_000);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let receiver = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_id, _, _) = create_token(&env, &token_admin);
 
-    let stream = client.get_stream(&stream_id).unwrap();
-    assert_eq!(stream.total_amount, 200_000_000);
-    // unlocked_at_150 = 100_000_000 * 50/100 = 50_000_000
-    // remaining = 50_000_000 + 100_000_000 (extra) = 150_000_000
-    // extra_seconds = 150_000_000 * 100 / 100_000_000 = 150
-    // new_end_time = 150 + 150 = 300
-    assert_eq!(stream.end_time, 300);
+    let (_, v2_client) = setup_v2(&env, &admin);
+
+    // Create 11 streams (exceeds limit)
+    let mut streams = Vec::new(&env);
+    for i in 0..11 {
+        streams.push_back(StreamArgs {
+            sender: sender.clone(),
+            receiver: receiver.clone(),
+            token: token_id.clone(),
+            total_amount: 10_000_000,
+            start_time: 0,
+            cliff_time: 0,
+            end_time: 100,
+            step_duration: 0,
+            multiplier_bps: 0,
+        });
+    }
+
+    let result = v2_client.try_create_batch_streams(&streams);
+    assert_eq!(result, Err(Ok(ContractError::BatchTooLarge)));
 }
 
 #[test]
-fn test_top_up_only_sender_allowed() {
+fn test_create_batch_streams_atomic_failure() {
     let env = Env::default();
-    let (client, _, receiver, stream_id) = make_stream(&env);
+    env.mock_all_auths();
 
-    env.ledger().with_mut(|li| li.timestamp = 110);
-    let result = client.try_top_up(&stream_id, &receiver, &500);
-    assert_eq!(result, Err(Ok(ContractError::NotStreamOwner)));
-}
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let receiver = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_id, token_client, _) = create_token(&env, &token_admin);
 
-#[test]
-fn test_top_up_cancelled_stream_fails() {
-    let env = Env::default();
-    let (client, sender, _, stream_id) = make_stream(&env);
+    // Mint insufficient tokens
+    token_client.mint(&sender, &100_000_000);
 
-    env.ledger().with_mut(|li| li.timestamp = 110);
-    client.cancel(&stream_id, &sender);
+    let (_, v2_client) = setup_v2(&env, &admin);
 
-    let result = client.try_top_up(&stream_id, &sender, &500);
-    assert_eq!(result, Err(Ok(ContractError::AlreadyCancelled)));
-}
+    // Create batch with total amount exceeding balance
+    let streams = vec![
+        &env,
+        StreamArgs {
+            sender: sender.clone(),
+            receiver: receiver.clone(),
+            token: token_id.clone(),
+            total_amount: 50_000_000,
+            start_time: 0,
+            cliff_time: 0,
+            end_time: 100,
+            step_duration: 0,
+            multiplier_bps: 0,
+        },
+        StreamArgs {
+            sender: sender.clone(),
+            receiver: receiver.clone(),
+            token: token_id.clone(),
+            total_amount: 60_000_000, // Total 110M > 100M balance
+            start_time: 0,
+            cliff_time: 0,
+            end_time: 100,
+            step_duration: 0,
+            multiplier_bps: 0,
+        },
+    ];
 
-#[test]
-fn test_top_up_nonexistent_stream_fails() {
-    let env = Env::default();
-    let (client, sender, _, _) = make_stream(&env);
+    // Should fail atomically (insufficient balance)
+    let result = v2_client.try_create_batch_streams(&streams);
+    assert!(result.is_err());
 
-    let result = client.try_top_up(&9999u64, &sender, &500);
-    assert_eq!(result, Err(Ok(ContractError::StreamNotFound)));
+    // No streams should be created
+    assert!(v2_client.try_get_stream(&0).is_err());
+    assert!(v2_client.try_get_stream(&1).is_err());
+
+    // Balance should be unchanged
+    assert_eq!(token_client.balance(&sender), 100_000_000);
 }

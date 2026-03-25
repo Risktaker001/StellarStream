@@ -25,11 +25,22 @@ model Stream {
   withdrawn    String?      @default("0")
   legacy       Boolean      @default(false) // true = originated from V1 contract
   migrated     Boolean      @default(false) // true = V1 stream superseded by V2
+  isPrivate    Boolean      @default(false)
+  createdAt    DateTime     @default(now())
 
   @@index([sender])
   @@index([receiver])
   @@index([streamId])
   @@index([legacy])
+}
+
+// Token prices for leaderboard volume calculations
+model TokenPrice {
+  tokenAddress String   @id
+  symbol       String
+  decimals     Int      @default(7)
+  priceUsd     Float    @default(0)
+  updatedAt    DateTime @updatedAt
 }
 
 // Registered Webhooks for external notifications
@@ -153,6 +164,7 @@ enum StreamStatus {
   PAUSED
   COMPLETED
   CANCELED
+  ARCHIVED // V1 stream successfully migrated to V2 — hidden from active UI
 }
 
 // API keys for 3rd-party partner dApps with elevated rate limits
@@ -176,4 +188,25 @@ model LedgerHash {
   sequence  Int      @id
   hash      String
   createdAt DateTime @default(now())
+}
+
+// Notification subscriptions — maps a Stellar address to a Discord/Telegram endpoint
+model NotificationSubscription {
+  id             String   @id @default(cuid())
+  stellarAddress String               // Receiver address to watch
+  platform       NotificationPlatform // discord | telegram
+  webhookUrl     String?              // Discord: full webhook URL
+  chatId         String?              // Telegram: chat/user ID
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([stellarAddress, platform])
+  @@index([stellarAddress])
+  @@index([platform])
+}
+
+enum NotificationPlatform {
+  discord
+  telegram
 }

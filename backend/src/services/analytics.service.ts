@@ -3,61 +3,95 @@ import { logger } from "../logger.js";
 
 export interface LeaderboardEntry {
   address: string;
-  totalVolume: string; // sum of stream amounts as string (high-precision)
+  totalVolumeUsd: string;
+  streamCount: number;
+}
+
+export interface AssetLeaderboardEntry {
+  tokenAddress: string;
+  totalVolumeUsd: string;
   streamCount: number;
 }
 
 export interface LeaderboardResult {
   topStreamers: LeaderboardEntry[];
   topReceivers: LeaderboardEntry[];
+  topAssets: AssetLeaderboardEntry[];
 }
 
 export class AnalyticsService {
   /**
-   * Aggregate total streamed volume per address and return the top 10
-   * streamers (by sender) and top 10 receivers (by receiver).
-   *
-   * `amount` is stored as a numeric string in the Stream table.
-   * We cast to NUMERIC in SQL to get correct ordering and summation.
+   * Aggregate total streamed volume (in USD) per sender, receiver, and asset.
+   * Filters out private streams.
+   * Supports 'daily', 'weekly', and 'all' (default) timeframes.
    */
-  async getLeaderboard(): Promise<LeaderboardResult> {
+  async getLeaderboard(timeframe: "daily" | "weekly" | "all" = "all"): Promise<LeaderboardResult> {
     try {
-      const [streamers, receivers] = await Promise.all([
-        prisma.$queryRaw<{ address: string; total_volume: string; stream_count: bigint }[]>`
+      let startDate = new Date(0);
+      if (timeframe === "daily") {
+        startDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      } else if (timeframe === "weekly") {
+        startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      }
+
+      const [streamers, receivers, assets] = await Promise.all([
+        prisma.$queryRaw<{ address: string; total_volume_usd: string; stream_count: bigint }[]>`
           SELECT
-            sender        AS address,
-            SUM(amount::NUMERIC)::TEXT AS total_volume,
-            COUNT(*)      AS stream_count
-          FROM "Stream"
-          GROUP BY sender
-          ORDER BY SUM(amount::NUMERIC) DESC
+            s.sender AS address,
+            COALESCE(SUM((s.amount::NUMERIC / POWER(10, COALESCE(tp.decimals, 7))) * COALESCE(tp."priceUsd", 0)), 0)::TEXT AS total_volume_usd,
+            COUNT(*) AS stream_count
+          FROM "Stream" s
+          LEFT JOIN "TokenPrice" tp ON s."tokenAddress" = tp."tokenAddress"
+          WHERE s."isPrivate" = false
+            AND s."createdAt" >= ${startDate}
+          GROUP BY s.sender
+          ORDER BY COALESCE(SUM((s.amount::NUMERIC / POWER(10, COALESCE(tp.decimals, 7))) * COALESCE(tp."priceUsd", 0)), 0) DESC
           LIMIT 10
         `,
-        prisma.$queryRaw<{ address: string; total_volume: string; stream_count: bigint }[]>`
+        prisma.$queryRaw<{ address: string; total_volume_usd: string; stream_count: bigint }[]>`
           SELECT
-            receiver      AS address,
-            SUM(amount::NUMERIC)::TEXT AS total_volume,
-            COUNT(*)      AS stream_count
-          FROM "Stream"
-          GROUP BY receiver
-          ORDER BY SUM(amount::NUMERIC) DESC
+            s.receiver AS address,
+            COALESCE(SUM((s.amount::NUMERIC / POWER(10, COALESCE(tp.decimals, 7))) * COALESCE(tp."priceUsd", 0)), 0)::TEXT AS total_volume_usd,
+            COUNT(*) AS stream_count
+          FROM "Stream" s
+          LEFT JOIN "TokenPrice" tp ON s."tokenAddress" = tp."tokenAddress"
+          WHERE s."isPrivate" = false
+            AND s."createdAt" >= ${startDate}
+          GROUP BY s.receiver
+          ORDER BY COALESCE(SUM((s.amount::NUMERIC / POWER(10, COALESCE(tp.decimals, 7))) * COALESCE(tp."priceUsd", 0)), 0) DESC
+          LIMIT 10
+        `,
+        prisma.$queryRaw<{ address: string; total_volume_usd: string; stream_count: bigint }[]>`
+          SELECT
+            COALESCE(s."tokenAddress", 'native') AS address,
+            COALESCE(SUM((s.amount::NUMERIC / POWER(10, COALESCE(tp.decimals, 7))) * COALESCE(tp."priceUsd", 0)), 0)::TEXT AS total_volume_usd,
+            COUNT(*) AS stream_count
+          FROM "Stream" s
+          LEFT JOIN "TokenPrice" tp ON s."tokenAddress" = tp."tokenAddress"
+          WHERE s."isPrivate" = false
+            AND s."createdAt" >= ${startDate}
+          GROUP BY COALESCE(s."tokenAddress", 'native')
+          ORDER BY COALESCE(SUM((s.amount::NUMERIC / POWER(10, COALESCE(tp.decimals, 7))) * COALESCE(tp."priceUsd", 0)), 0) DESC
           LIMIT 10
         `,
       ]);
 
-      const mapEntry = (row: {
-        address: string;
-        total_volume: string;
-        stream_count: bigint;
-      }): LeaderboardEntry => ({
+      const mapEntry = (row: { address: string; total_volume_usd: string; stream_count: bigint }): LeaderboardEntry => ({
         address: row.address,
-        totalVolume: row.total_volume,
+        totalVolumeUsd: String(row.total_volume_usd),
+        streamCount: Number(row.stream_count),
+      });
+
+      const mapAssetEntry = (row: { address: string; total_volume_usd: string; stream_count: bigint }): AssetLeaderboardEntry => ({
+        tokenAddress: row.address,
+        totalVolumeUsd: String(row.total_volume_usd),
         streamCount: Number(row.stream_count),
       });
 
       return {
         topStreamers: streamers.map(mapEntry),
         topReceivers: receivers.map(mapEntry),
+        topAssets: assets.map(mapAssetEntry),
       };
     } catch (error) {
       logger.error("Failed to compute leaderboard", error);

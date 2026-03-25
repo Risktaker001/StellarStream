@@ -270,8 +270,8 @@ function StreamActionModal({
     <div
       ref={overlayRef}
       onClick={handleOverlay}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-md"
+      style={{ background: "rgba(0,0,0,0.7)" }}
     >
       <div
         className="relative w-full max-w-md rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-2xl overflow-hidden"

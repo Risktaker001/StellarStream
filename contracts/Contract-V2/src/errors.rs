@@ -17,4 +17,5 @@ pub enum ContractError {
     StreamNotFound = 13,
     InvalidTimeRange = 14,
     AlreadyCancelled = 15,
+    BatchTooLarge = 16,
 }

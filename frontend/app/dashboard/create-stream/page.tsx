@@ -788,7 +788,7 @@ function SuccessScreen({ form, onReset }: { form: FormData; onReset: () => void 
           View Stream →
         </button>
         <button
-          className="flex-1 rounded-2xl bg-cyan-400 py-3 font-body text-sm font-bold text-black transition hover:bg-cyan-300"
+          className="flex-1 rounded-2xl bg-cyan-400 py-3 font-body text-sm font-bold text-black transition hover:bg-cyan-300 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.6),0_0_16px_rgba(34,211,238,0.3)]"
           onClick={onReset}
         >
           + New Stream

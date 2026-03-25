@@ -13,7 +13,9 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "test:jest": "jest --config jest.config.cjs --runInBand"
+    "test:jest": "jest --config jest.config.cjs --runInBand",
+    "migrate:v1-to-v2": "tsx src/scripts/migrate-v1-to-v2.ts",
+    "migrate:v1-to-v2:dry": "tsx src/scripts/migrate-v1-to-v2.ts --dry-run"
   },
   "keywords": [
     "stellar",

@@ -5,7 +5,7 @@ import { StreamEventPayload, BalanceUpdatePayload } from "./websocket.service.js
 
 export type IndexedStreamStatus = "ACTIVE" | "CANCELED" | "COMPLETED" | "PAUSED";
 
-interface StreamLifecycleRecord {
+export interface StreamLifecycleRecord {
   stream_id: string;
   tx_hash_created: string;
   sender: string;
@@ -182,7 +182,7 @@ export class StreamLifecycleService {
     };
   }
 
-  private async loadDb(): Promise<StreamLifecycleDatabase> {
+  async loadDb(): Promise<StreamLifecycleDatabase> {
     try {
       const raw = await readFile(this.dbPath, "utf-8");
       const parsed = JSON.parse(raw) as unknown;

@@ -128,8 +128,8 @@ function CalendarModal({
   return (
     /* Backdrop */
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
+      className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md"
+      style={{ background: "rgba(0,0,0,0.6)" }}
     >
       {/* Modal */}
       <div

@@ -15,14 +15,14 @@
 import { xdr, nativeToScVal } from "@stellar/stellar-sdk";
 
 // ─── Mock Prisma before any service imports ───────────────────────────────────
-const mockEventLogCreate = jest.fn().mockResolvedValue({ id: "mock-id" });
+const mockEventLogUpsert = jest.fn().mockResolvedValue({ id: "mock-id" });
 const mockEventLogFindMany = jest.fn().mockResolvedValue([]);
 
 jest.mock("../generated/client/index.js", () => {
   return {
     PrismaClient: jest.fn().mockImplementation(() => ({
       eventLog: {
-        create: mockEventLogCreate,
+        upsert: mockEventLogUpsert,
         findMany: mockEventLogFindMany,
       },
     })),
@@ -197,7 +197,7 @@ describe("Indexer — Soroban event parsing and DB persistence", () => {
   // ── AuditLogService → prisma.eventLog.create ─────────────────────────────
 
   describe("AuditLogService.logEvent() — DB persistence", () => {
-    it("calls prisma.eventLog.create with correct data for a stream_created event", async () => {
+    it("calls prisma.eventLog.upsert with correct data for a stream_created event", async () => {
       await auditLogService.logEvent({
         eventType: "create",
         streamId: "42",
@@ -210,23 +210,27 @@ describe("Indexer — Soroban event parsing and DB persistence", () => {
         metadata: { stream_id: "42", total_amount: "5000000000" },
       });
 
-      expect(mockEventLogCreate).toHaveBeenCalledTimes(1);
-      expect(mockEventLogCreate).toHaveBeenCalledWith({
-        data: {
+      expect(mockEventLogUpsert).toHaveBeenCalledTimes(1);
+      const upsertArg = mockEventLogUpsert.mock.calls[0][0];
+      expect(upsertArg.create).toEqual({
           eventType: "create",
           streamId: "42",
           txHash: "txhash_create_001",
+          eventIndex: 0,
           ledger: 1234,
           ledgerClosedAt: "2025-06-01T12:00:00Z",
           sender: "GALICESENDERADDRESS",
           receiver: "GBOBRECEIVER",
           amount: 5000000000n,
-          metadata: JSON.stringify({ stream_id: "42", total_amount: "5000000000" }),
+          metadata: JSON.stringify({
+            stream_id: "42",
+            total_amount: "5000000000",
+          }),
         },
-      });
+      );
     });
 
-    it("calls prisma.eventLog.create with correct data for a stream_withdrawn event", async () => {
+    it("calls prisma.eventLog.upsert with correct data for a stream_withdrawn event", async () => {
       await auditLogService.logEvent({
         eventType: "withdraw",
         streamId: "42",
@@ -237,16 +241,16 @@ describe("Indexer — Soroban event parsing and DB persistence", () => {
         metadata: { stream_id: "42", amount: "1000000" },
       });
 
-      expect(mockEventLogCreate).toHaveBeenCalledTimes(1);
-      const callArg = mockEventLogCreate.mock.calls[0][0];
-      expect(callArg.data.eventType).toBe("withdraw");
-      expect(callArg.data.streamId).toBe("42");
-      expect(callArg.data.amount).toBe(1000000n);
-      expect(callArg.data.sender).toBeNull();
-      expect(callArg.data.receiver).toBeNull();
+      expect(mockEventLogUpsert).toHaveBeenCalledTimes(1);
+      const upsertArg = mockEventLogUpsert.mock.calls[0][0];
+      expect(upsertArg.create.eventType).toBe("withdraw");
+      expect(upsertArg.create.streamId).toBe("42");
+      expect(upsertArg.create.amount).toBe(1000000n);
+      expect(upsertArg.create.sender).toBeNull();
+      expect(upsertArg.create.receiver).toBeNull();
     });
 
-    it("calls prisma.eventLog.create with correct data for a stream_cancelled event", async () => {
+    it("calls prisma.eventLog.upsert with correct data for a stream_cancelled event", async () => {
       await auditLogService.logEvent({
         eventType: "cancel",
         streamId: "7",
@@ -257,12 +261,12 @@ describe("Indexer — Soroban event parsing and DB persistence", () => {
         metadata: { stream_id: "7", to_receiver: "800000", to_sender: "200000" },
       });
 
-      expect(mockEventLogCreate).toHaveBeenCalledTimes(1);
-      const callArg = mockEventLogCreate.mock.calls[0][0];
-      expect(callArg.data.eventType).toBe("cancel");
-      expect(callArg.data.streamId).toBe("7");
-      expect(callArg.data.amount).toBe(1000000n);
-      expect(callArg.data.metadata).toBe(
+      expect(mockEventLogUpsert).toHaveBeenCalledTimes(1);
+      const upsertArg = mockEventLogUpsert.mock.calls[0][0];
+      expect(upsertArg.create.eventType).toBe("cancel");
+      expect(upsertArg.create.streamId).toBe("7");
+      expect(upsertArg.create.amount).toBe(1000000n);
+      expect(upsertArg.create.metadata).toBe(
         JSON.stringify({ stream_id: "7", to_receiver: "800000", to_sender: "200000" })
       );
     });
@@ -279,8 +283,8 @@ describe("Indexer — Soroban event parsing and DB persistence", () => {
         metadata: meta,
       });
 
-      const callArg = mockEventLogCreate.mock.calls[0][0];
-      expect(callArg.data.metadata).toBe(JSON.stringify(meta));
+      const upsertArg = mockEventLogUpsert.mock.calls[0][0];
+      expect(upsertArg.create.metadata).toBe(JSON.stringify(meta));
     });
 
     it("passes null for optional fields when not provided", async () => {
@@ -293,15 +297,15 @@ describe("Indexer — Soroban event parsing and DB persistence", () => {
         // no sender, receiver, amount, metadata
       });
 
-      const callArg = mockEventLogCreate.mock.calls[0][0];
-      expect(callArg.data.sender).toBeNull();
-      expect(callArg.data.receiver).toBeNull();
-      expect(callArg.data.amount).toBeNull();
-      expect(callArg.data.metadata).toBeNull();
+      const upsertArg = mockEventLogUpsert.mock.calls[0][0];
+      expect(upsertArg.create.sender).toBeNull();
+      expect(upsertArg.create.receiver).toBeNull();
+      expect(upsertArg.create.amount).toBeNull();
+      expect(upsertArg.create.metadata).toBeNull();
     });
 
-    it("does not throw when prisma.eventLog.create rejects (error is swallowed)", async () => {
-      mockEventLogCreate.mockRejectedValueOnce(new Error("DB connection lost"));
+    it("does not throw when prisma.eventLog.upsert rejects (error is swallowed)", async () => {
+      mockEventLogUpsert.mockRejectedValueOnce(new Error("DB connection lost"));
 
       // AuditLogService catches and logs errors — it must not propagate
       await expect(
@@ -355,8 +359,8 @@ describe("Indexer — Soroban event parsing and DB persistence", () => {
       });
 
       // Step 3: verify the Prisma create was called with the right data
-      expect(mockEventLogCreate).toHaveBeenCalledTimes(1);
-      const saved = mockEventLogCreate.mock.calls[0][0].data;
+      expect(mockEventLogUpsert).toHaveBeenCalledTimes(1);
+      const saved = mockEventLogUpsert.mock.calls[0][0].create;
       expect(saved.eventType).toBe("create");
       expect(saved.txHash).toBe("e2e_txhash_create");
       expect(saved.ledger).toBe(2000);
@@ -389,8 +393,8 @@ describe("Indexer — Soroban event parsing and DB persistence", () => {
         metadata: eventData,
       });
 
-      expect(mockEventLogCreate).toHaveBeenCalledTimes(1);
-      const saved = mockEventLogCreate.mock.calls[0][0].data;
+      expect(mockEventLogUpsert).toHaveBeenCalledTimes(1);
+      const saved = mockEventLogUpsert.mock.calls[0][0].create;
       expect(saved.eventType).toBe("withdraw");
       expect(saved.txHash).toBe("e2e_txhash_withdraw");
       expect(saved.ledger).toBe(2100);
@@ -433,8 +437,8 @@ describe("Indexer — Soroban event parsing and DB persistence", () => {
         },
       });
 
-      expect(mockEventLogCreate).toHaveBeenCalledTimes(1);
-      const saved = mockEventLogCreate.mock.calls[0][0].data;
+      expect(mockEventLogUpsert).toHaveBeenCalledTimes(1);
+      const saved = mockEventLogUpsert.mock.calls[0][0].create;
       expect(saved.eventType).toBe("cancel");
       expect(saved.txHash).toBe("e2e_txhash_cancel");
       expect(saved.ledger).toBe(2200);

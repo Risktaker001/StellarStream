@@ -1,7 +1,7 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Symbol, Vec};
 
 mod errors;
 mod storage;
@@ -10,9 +10,9 @@ mod v1_interface;
 
 use errors::ContractError;
 pub use types::{
-    AdminTransferredEvent, ContractPausedEvent, ContractUnpausedEvent, PermitArgs,
-    PermitStreamCreatedEvent, StreamArgs, StreamCancelledV2Event, StreamClaimV2Event,
-    StreamCreatedV2Event, StreamMigratedEvent, StreamToppedUpEvent, StreamV2,
+    BatchStreamsCreatedEvent, ContractPausedEvent, ContractUnpausedEvent, MigrationEvent, PermitArgs, PermitStreamCreatedEvent, StreamArgs,
+    StreamCancelledV2Event, StreamClaimV2Event, StreamCreatedV2Event, StreamMigratedEvent,
+    StreamV2,
 };
 use v1_interface::Client as V1Client;
 
@@ -196,6 +196,12 @@ impl Contract {
                 migrated_amount: remaining,
                 timestamp: now,
             },
+        );
+
+        // Emit migration event for indexer
+        env.events().publish(
+            Symbol::new(&env, "migrate"),
+            (v1_stream_id, v2_stream_id, caller.clone(), remaining),
         );
 
         Ok(v2_stream_id)
@@ -641,6 +647,121 @@ impl Contract {
         );
 
         Ok(stream_id)
+    }
+
+    // ----------------------------------------------------------------
+    // Issue #367 — Batch Stream Creation
+    // ----------------------------------------------------------------
+
+    pub fn create_batch_streams(env: Env, streams: Vec<StreamArgs>) -> Result<Vec<u64>, ContractError> {
+        Self::require_not_paused(&env)?;
+
+        // Validate batch size limit (max 10 streams)
+        if streams.len() > 10 {
+            return Err(ContractError::BatchTooLarge);
+        }
+
+        if streams.is_empty() {
+            return Err(ContractError::InvalidTimeRange); // Reuse error for empty batch
+        }
+
+        // Validate all streams upfront to ensure atomicity
+        let mut total_amount: i128 = 0;
+        let mut sender = streams.get(0).unwrap().sender.clone();
+
+        for args in streams.iter() {
+            // All streams must have the same sender
+            if args.sender != sender {
+                return Err(ContractError::InvalidTimeRange); // Reuse error for inconsistent sender
+            }
+
+            // Validate time ranges
+            if args.start_time >= args.end_time
+                || args.cliff_time < args.start_time
+                || args.cliff_time > args.end_time
+            {
+                return Err(ContractError::InvalidTimeRange);
+            }
+
+            // Validate dust threshold
+            if args.total_amount < storage::get_min_value(&env, &args.token) {
+                return Err(ContractError::BelowDustThreshold);
+            }
+
+            total_amount = total_amount.checked_add(args.total_amount)
+                .ok_or(ContractError::InvalidTimeRange)?; // Overflow protection
+        }
+
+        // Require auth from the sender
+        sender.require_auth();
+
+        // Calculate total amount needed and transfer all tokens at once
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &streams.get(0).unwrap().token);
+        token_client.transfer(
+            &sender,
+            &env.current_contract_address(),
+            &total_amount,
+        );
+
+        // Create all streams
+        let mut stream_ids = Vec::new(&env);
+        let mut total_created_amount: i128 = 0;
+
+        for args in streams.iter() {
+            let stream_id = storage::next_stream_id(&env);
+
+            let stream = StreamV2 {
+                sender: args.sender.clone(),
+                receiver: args.receiver.clone(),
+                token: args.token.clone(),
+                total_amount: args.total_amount,
+                start_time: args.start_time,
+                end_time: args.end_time,
+                cliff_time: args.cliff_time,
+                withdrawn_amount: 0,
+                cancelled: false,
+                migrated_from_v1: false,
+                v1_stream_id: 0,
+                step_duration: args.step_duration,
+                multiplier_bps: args.multiplier_bps,
+            };
+
+            storage::set_stream(&env, stream_id, &stream);
+            storage::update_stats(&env, args.total_amount, &args.sender, &args.receiver);
+
+            // Emit individual stream creation event
+            env.events().publish(
+                (symbol_short!("create_v2"), args.sender.clone()),
+                StreamCreatedV2Event {
+                    stream_id,
+                    sender: args.sender.clone(),
+                    receiver: args.receiver.clone(),
+                    token: args.token.clone(),
+                    total_amount: args.total_amount,
+                    start_time: args.start_time,
+                    cliff_time: args.cliff_time,
+                    end_time: args.end_time,
+                    timestamp: env.ledger().timestamp(),
+                },
+            );
+
+            stream_ids.push_back(stream_id);
+            total_created_amount = total_created_amount.checked_add(args.total_amount).unwrap();
+        }
+
+        // Emit batch creation summary event
+        env.events().publish(
+            (symbol_short!("batch_create"), sender.clone()),
+            BatchStreamsCreatedEvent {
+                stream_ids: stream_ids.clone(),
+                sender: sender.clone(),
+                total_streams: stream_ids.len() as u32,
+                total_amount: total_created_amount,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
+        Ok(stream_ids)
     }
 }
 

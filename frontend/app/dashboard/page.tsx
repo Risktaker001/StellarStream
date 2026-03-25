@@ -45,14 +45,18 @@ const fmtDate = (d: Date) =>
 const fmtTime = (d: Date) =>
   d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 
-// ─── Live Counter ─────────────────────────────────────────────────────────────
+// ─── Live Counter (Mobile-Optimized) ──────────────────────────────────────────
 function LiveCounter({ base, rate }: { base: number; rate: number }) {
   const [val, setVal] = useState(base);
   useEffect(() => {
     const id = setInterval(() => setVal((v) => v + rate * 0.1), 100);
     return () => clearInterval(id);
   }, [rate]);
-  return <>{fmt(val)}</>;
+  return (
+    <span className="inline-block tabular-nums text-center">
+      {fmt(val)}
+    </span>
+  );
 }
 
 // ─── Radial Progress Arc ──────────────────────────────────────────────────────
@@ -194,10 +198,10 @@ export default function StreamDetailPage() {
   const daysLeft  = Math.ceil((STREAM.endTime.getTime() - Date.now()) / 86_400_000);
 
   return (
-    <div className="min-h-screen p-4 md:p-6 space-y-4">
+    <div className="min-h-screen p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
 
-      {/* ── Header ── */}
-      <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-xl md:p-8">
+      {/* ── Header (Mobile-First) ── */}
+      <section className="rounded-2xl md:rounded-3xl border border-white/10 bg-white/[0.04] p-5 md:p-6 lg:p-8 backdrop-blur-xl">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="flex items-center gap-3 flex-wrap">
@@ -217,10 +221,10 @@ export default function StreamDetailPage() {
             </p>
           </div>
           <div className="flex gap-2 flex-shrink-0 pt-1">
-            <button className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm text-white/60 backdrop-blur-xl transition hover:bg-white/[0.08] hover:text-white/90 font-body">
+            <button className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm text-white/60 backdrop-blur-xl transition hover:bg-white/[0.08] hover:text-white/90 hover:shadow-[0_0_0_2px_rgba(255,255,255,0.15)] font-body">
               ⏸ Pause
             </button>
-            <button className="rounded-xl bg-emerald-400 px-5 py-2 text-sm font-bold text-black transition hover:bg-emerald-300 font-body">
+            <button className="rounded-xl bg-emerald-400 px-5 py-2 text-sm font-bold text-black transition hover:bg-emerald-300 hover:shadow-[0_0_0_2px_rgba(52,211,153,0.6),0_0_16px_rgba(52,211,153,0.3)] font-body">
               → Withdraw
             </button>
           </div>

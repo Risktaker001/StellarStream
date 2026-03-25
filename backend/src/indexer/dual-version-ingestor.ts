@@ -14,8 +14,10 @@ import {
   saveLastLedgerSequence,
 } from "../services/syncMetadata.service.js";
 import { logger } from "../logger.js";
+import { NotificationService } from "../services/notification.service.js";
 
 const prisma = new PrismaClient();
+const notificationService = new NotificationService();
 
 const RPC_URL          = process.env.STELLAR_RPC_URL ?? "";
 const V1_CONTRACT_ID   = process.env.V1_CONTRACT_ID  ?? "";
@@ -130,6 +132,18 @@ export class DualVersionIngestor {
         legacy:      isLegacy,
       },
     });
+
+    // Fire "Stream Received" notification for new streams
+    if (action === "create") {
+      notificationService.notifyStreamReceived({
+        streamId,
+        sender:       String(payload.sender   ?? ""),
+        receiver:     String(payload.receiver ?? ""),
+        amount:       String(payload.amount   ?? "0"),
+        tokenAddress: payload.token ? String(payload.token) : null,
+        txHash:       event.txHash ?? event.id,
+      }).catch(err => logger.error("[DualIngestor] Notification dispatch error", { err }));
+    }
   }
 
   /**
