@@ -1305,3 +1305,74 @@ fn test_get_active_volume_mixed_roles() {
     let volume = v2_client.get_active_volume(&user);
     assert_eq!(volume, 400_000_000);
 }
+
+#[test]
+fn test_rebalance_after_clawback() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let receiver1 = Address::generate(&env);
+    let receiver2 = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_id, token_client, asset_client) = create_token(&env, &token_admin);
+    let (_, v2_client) = setup_v2(&env, &admin);
+
+    asset_client.mint(&sender, &1000_000_000);
+
+    // Create 2 streams of 500M each. Total remaining: 1000M
+    let _sid1 = v2_client.create_stream(&StreamArgs {
+        sender: sender.clone(),
+        receiver: receiver1.clone(),
+        token: token_id.clone(),
+        total_amount: 500_000_000,
+        start_time: 0,
+        cliff_time: 0,
+        end_time: 1000,
+        step_duration: 0,
+        multiplier_bps: 0,
+    });
+
+    let _sid2 = v2_client.create_stream(&StreamArgs {
+        sender: sender.clone(),
+        receiver: receiver2.clone(),
+        token: token_id.clone(),
+        total_amount: 500_000_000,
+        start_time: 0,
+        cliff_time: 0,
+        end_time: 1000,
+        step_duration: 0,
+        multiplier_bps: 0,
+    });
+
+    // Verify integrity before clawback
+    let (balance, sum) = v2_client.check_balance_integrity(&token_id);
+    assert_eq!(balance, 1000_000_000);
+    assert_eq!(sum, 1000_000_000);
+
+    // Simulate clawback of 500M from the contract address
+    // We achieve this by transferring tokens OUT of the contract in the test environment
+    env.mock_all_auths();
+    token_client.transfer(&v2_client.address, &admin, &500_000_000);
+
+    // Verify deficit
+    let (balance, sum) = v2_client.check_balance_integrity(&token_id);
+    assert_eq!(balance, 500_000_000);
+    assert_eq!(sum, 1000_000_000);
+
+    // Rebalance
+    v2_client.rebalance_after_clawback(&token_id);
+
+    // Verify proportional reduction (factor = 50%)
+    let stream1 = v2_client.get_stream(&0).unwrap();
+    let stream2 = v2_client.get_stream(&1).unwrap();
+
+    assert_eq!(stream1.total_amount, 250_000_000);
+    assert_eq!(stream2.total_amount, 250_000_000);
+
+    // Final integrity check
+    let (balance, sum) = v2_client.check_balance_integrity(&token_id);
+    assert_eq!(balance, 500_000_000);
+    assert_eq!(sum, 500_000_000);
+}
