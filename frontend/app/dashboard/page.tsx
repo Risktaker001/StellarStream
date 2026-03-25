@@ -217,10 +217,10 @@ export default function StreamDetailPage() {
             </p>
           </div>
           <div className="flex gap-2 flex-shrink-0 pt-1">
-            <button className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm text-white/60 backdrop-blur-xl transition hover:bg-white/[0.08] hover:text-white/90 font-body">
+            <button className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm text-white/60 backdrop-blur-xl transition hover:bg-white/[0.08] hover:text-white/90 hover:shadow-[0_0_0_2px_rgba(255,255,255,0.15)] font-body">
               ⏸ Pause
             </button>
-            <button className="rounded-xl bg-emerald-400 px-5 py-2 text-sm font-bold text-black transition hover:bg-emerald-300 font-body">
+            <button className="rounded-xl bg-emerald-400 px-5 py-2 text-sm font-bold text-black transition hover:bg-emerald-300 hover:shadow-[0_0_0_2px_rgba(52,211,153,0.6),0_0_16px_rgba(52,211,153,0.3)] font-body">
               → Withdraw
             </button>
           </div>

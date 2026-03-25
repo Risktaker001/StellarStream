@@ -91,7 +91,7 @@ function StreamCard({ stream, type }: { stream: Stream; type: "outgoing" | "inco
           <div className={`p-1.5 rounded-lg bg-white/5 ${iconColor}`}>
             <Icon size={16} />
           </div>
-          <span className="font-mono text-sm text-white/90">{stream.recipient}</span>
+          <span className="font-ticker text-sm text-white/90">{stream.recipient}</span>
         </div>
         <span
           className={`text-xs px-2 py-0.5 rounded-full ${
