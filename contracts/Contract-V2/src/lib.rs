@@ -413,6 +413,69 @@ impl Contract {
         res
     }
 
+    pub fn top_up(env: Env, stream_id: u64, sender: Address, extra_amount: i128) -> Result<(), ContractError> {
+        Self::require_not_paused(&env)?;
+        sender.require_auth();
+
+        if extra_amount <= 0 {
+            return Err(ContractError::BelowDustThreshold);
+        }
+
+        let mut stream =
+            storage::get_stream(&env, stream_id).ok_or(ContractError::StreamNotFound)?;
+
+        if stream.sender != sender {
+            return Err(ContractError::NotStreamOwner);
+        }
+
+        if stream.cancelled {
+            return Err(ContractError::AlreadyCancelled);
+        }
+
+        let now = env.ledger().timestamp();
+
+        // Checkpoint: calculate what's already unlocked so the rate stays consistent.
+        let unlocked_at_now = Self::calculate_unlocked_internal(&stream, now);
+        let remaining = stream.total_amount.saturating_sub(unlocked_at_now);
+
+        // Pull the new funds into the contract.
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &stream.token);
+        token_client.transfer(
+            &sender,
+            &env.current_contract_address(),
+            &extra_amount,
+        );
+
+        // Extend end_time proportionally: keep the same rate over the new remaining balance.
+        let duration = (stream.end_time - stream.start_time) as i128;
+        let new_remaining = remaining + extra_amount;
+        let rate = stream.total_amount; // tokens per `duration` seconds
+        // new_end_time = now + (new_remaining * duration / rate)
+        let extra_seconds = (new_remaining * duration) / rate;
+        let new_end_time = now + extra_seconds as u64;
+
+        stream.total_amount += extra_amount;
+        stream.end_time = new_end_time;
+        storage::set_stream(&env, stream_id, &stream);
+
+        // Update TVL.
+        storage::update_stats(&env, extra_amount, &stream.sender, &stream.receiver);
+
+        env.events().publish(
+            (symbol_short!("top_up"), sender.clone()),
+            StreamToppedUpEvent {
+                stream_id,
+                sender,
+                extra_amount,
+                new_total_amount: stream.total_amount,
+                new_end_time,
+                timestamp: now,
+            },
+        );
+
+        Ok(())
+    }
+
     pub fn bump_active_streams_ttl(env: Env, ids: Vec<u64>) -> u32 {
         storage::bump_streams_ttl(&env, &ids)
     }
