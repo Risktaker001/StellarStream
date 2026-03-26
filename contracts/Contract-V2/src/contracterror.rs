@@ -39,4 +39,6 @@ pub enum Error {
     InvalidPenalty = 30,
     /// migrate_stream is blocked; standard V2 streams remain active.
     MigrationPaused = 31,
+    /// Relayer fee exceeds the available withdrawal amount
+    InvalidRelayerFee = 32,
 }

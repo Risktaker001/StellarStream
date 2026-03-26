@@ -384,6 +384,162 @@ impl Contract {
         Ok(to_withdraw)
     }
 
+    // ----------------------------------------------------------------
+    // Issue #391 — Meta-Transaction "Gasless" Withdrawals
+    // ----------------------------------------------------------------
+
+    /// Withdraw from a stream using a signed message, allowing a relayer to
+    /// pay the gas fee in exchange for a small fee in the streamed asset.
+    ///
+    /// The receiver signs a "Withdrawal Intent" off-chain containing:
+    /// - stream_id, withdrawal_amount, relayer_fee, nonce, deadline
+    ///
+    /// The relayer (env.invoker()) submits the transaction and receives
+    /// `relayer_fee` from the withdrawn amount. The receiver gets the rest.
+    ///
+    /// # Parameters
+    /// - `stream_id`: The stream to withdraw from
+    /// - `withdrawal_amount`: Total amount to withdraw (must be <= unlocked)
+    /// - `relayer_fee`: Fee paid to the relayer (must be < withdrawal_amount)
+    /// - `nonce`: Unique nonce to prevent replay attacks
+    /// - `deadline`: Unix timestamp after which the signature expires
+    /// - `signature`: Ed25519 signature from the receiver's public key
+    pub fn withdraw_meta(
+        env: Env,
+        stream_id: u64,
+        withdrawal_amount: i128,
+        relayer_fee: i128,
+        nonce: u64,
+        deadline: u64,
+        signature: soroban_sdk::BytesN<64>,
+    ) -> Result<i128, Error> {
+        Self::require_not_paused(&env)?;
+
+        let now = env.ledger().timestamp();
+        if now > deadline {
+            return Err(Error::ExpiredDeadline);
+        }
+
+        if relayer_fee < 0 || relayer_fee >= withdrawal_amount {
+            return Err(Error::InvalidRelayerFee);
+        }
+
+        let mut stream = storage::get_stream(&env, stream_id).ok_or(Error::StreamNotFound)?;
+
+        if stream.cancelled {
+            return Err(Error::AlreadyCancelled);
+        }
+
+        // Verify nonce to prevent replay attacks
+        let nonce_key = (symbol_short!("W_NONCE"), stream.beneficiary.clone(), stream_id);
+        let stored_nonce: u64 = env.storage().instance().get(&nonce_key).unwrap_or(0u64);
+
+        if nonce != stored_nonce {
+            return Err(Error::InvalidNonce);
+        }
+
+        // Calculate unlocked amount
+        let unlocked = Self::calculate_unlocked_internal(&stream, now);
+        let available = unlocked.saturating_sub(stream.withdrawn_amount);
+
+        if withdrawal_amount > available {
+            return Err(Error::NothingToWithdraw);
+        }
+
+        if withdrawal_amount <= 0 {
+            return Err(Error::NothingToWithdraw);
+        }
+
+        // Construct the message that was signed
+        let mut msg = soroban_sdk::Bytes::new(&env);
+        msg.extend_from_slice(b"STELLARSTREAM_WITHDRAW_META_V2");
+        msg.append(&env.current_contract_address().to_xdr(&env));
+        msg.extend_from_slice(&stream_id.to_be_bytes());
+        msg.extend_from_slice(&withdrawal_amount.to_be_bytes());
+        msg.extend_from_slice(&relayer_fee.to_be_bytes());
+        msg.extend_from_slice(&nonce.to_be_bytes());
+        msg.extend_from_slice(&deadline.to_be_bytes());
+
+        let msg_hash: soroban_sdk::BytesN<32> = env.crypto().sha256(&msg).into();
+
+        // Extract the public key from the beneficiary address
+        // Note: This assumes the beneficiary is an account (not a contract)
+        let beneficiary_pubkey = match stream.beneficiary.clone() {
+            Address::Account(acc) => acc.0,
+            Address::Contract(_) => return Err(Error::InvalidSignature),
+        };
+
+        // Verify the signature
+        env.crypto()
+            .ed25519_verify(&beneficiary_pubkey, &msg_hash.into(), &signature);
+
+        // Increment nonce to prevent replay
+        env.storage()
+            .instance()
+            .set(&nonce_key, &(stored_nonce + 1));
+
+        // If Yield-Bearing, withdraw principal from Vault
+        if stream.yield_enabled {
+            if let Some(vault_addr) = &stream.vault_address {
+                let vault_client = VaultClient::new(&env, vault_addr);
+                let result = vault_client.try_withdraw(&withdrawal_amount);
+
+                if result.is_err() {
+                    stream.is_pending = true;
+                    storage::set_stream(&env, stream_id, &stream);
+                    return Ok(0);
+                }
+            }
+        }
+
+        // Calculate amounts
+        let to_receiver = withdrawal_amount - relayer_fee;
+        let relayer = env.invoker();
+
+        // Perform transfers
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &stream.token);
+
+        if to_receiver > 0 {
+            token_client.transfer(
+                &env.current_contract_address(),
+                &stream.beneficiary,
+                &to_receiver,
+            );
+        }
+
+        if relayer_fee > 0 {
+            token_client.transfer(&env.current_contract_address(), &relayer, &relayer_fee);
+        }
+
+        // Update state
+        stream.withdrawn_amount += withdrawal_amount;
+        stream.is_pending = false;
+        storage::set_stream(&env, stream_id, &stream);
+
+        // Update analytics (TVL decreased)
+        storage::update_stats(&env, -withdrawal_amount, &stream.sender, &stream.receiver);
+
+        let mut data = Vec::new(&env);
+        data.push_back(stream_id.into_val(&env));
+        data.push_back(stream.beneficiary.clone().into_val(&env));
+        data.push_back(relayer.clone().into_val(&env));
+        data.push_back(to_receiver.into_val(&env));
+        data.push_back(relayer_fee.into_val(&env));
+        data.push_back(now.into_val(&env));
+
+        env.events().publish(
+            (stream_id, symbol_short!("meta_wdrw")),
+            NebulaEvent {
+                version: 2,
+                timestamp: now,
+                action: symbol_short!("meta_wdrw"),
+                data,
+            },
+        );
+
+        Ok(withdrawal_amount)
+    }
+
     pub fn cancel(env: Env, stream_id: u64, caller: Address) -> Result<(), Error> {
         Self::require_not_paused(&env)?;
 
@@ -1416,6 +1572,13 @@ impl Contract {
     /// Query pending fee balance for a `(recipient, token)` pair.
     pub fn get_pending_fees(env: Env, recipient: Address, token: Address) -> i128 {
         storage::get_pending_fees(&env, &recipient, &token)
+    }
+
+    /// Get the current withdrawal nonce for a beneficiary on a specific stream.
+    /// Used for meta-transaction withdrawals to prevent replay attacks.
+    pub fn get_withdrawal_nonce(env: Env, beneficiary: Address, stream_id: u64) -> u64 {
+        let nonce_key = (symbol_short!("W_NONCE"), beneficiary, stream_id);
+        env.storage().instance().get(&nonce_key).unwrap_or(0u64)
     }
 }
 
