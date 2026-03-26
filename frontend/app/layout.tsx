@@ -5,6 +5,7 @@ import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
 import { ToastProvider } from "@/components/toast-provider";
 import { WalletProvider } from "@/lib/wallet-context";
+import { StellarProvider } from "@/lib/providers/StellarProvider";
 import { ProtocolStatusProvider } from "@/lib/use-protocol-status";
 import { EmergencyBanner } from "@/components/emergency-banner";
 import ErrorTracker from "@/components/error-tracker";
@@ -36,6 +37,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${lato.variable} ${poppins.variable} antialiased flex flex-col min-h-screen`}>
         <WalletProvider>
+          <StellarProvider>
           <ProtocolStatusProvider>
             {/* High-visibility emergency banner — rendered above everything */}
             <EmergencyBanner />
@@ -46,6 +48,7 @@ export default function RootLayout({
             <Footer />
             <ToastProvider />
           </ProtocolStatusProvider>
+          </StellarProvider>
         </WalletProvider>
       </body>
     </html>
