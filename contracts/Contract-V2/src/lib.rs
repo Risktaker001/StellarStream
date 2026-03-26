@@ -676,11 +676,11 @@ impl Contract {
         }
 
         let mut results = Vec::new(&env);
-        let now = env.ledger().timestamp();
+        let now_nanos = Self::ledger_timestamp_nanos(&env);
 
         for id in ids.iter() {
             if let Some(stream) = storage::get_stream(&env, id) {
-                let unlocked = Self::calculate_unlocked_internal(&stream, now);
+                let unlocked = Self::calculate_unlocked_internal(&stream, now_nanos);
                 let remaining_unlocked = unlocked.saturating_sub(stream.withdrawn_amount);
 
                 let status = if stream.cancelled {
@@ -869,8 +869,8 @@ impl Contract {
             return Err(Error::InvalidNonce);
         }
 
-        // Calculate unlocked amount
-        let unlocked = Self::calculate_unlocked_internal(&stream, now);
+        // Calculate unlocked amount (Issue #403 — nanosecond domain)
+        let unlocked = Self::calculate_unlocked_internal(&stream, Self::ledger_timestamp_nanos(&env));
         let available = unlocked.saturating_sub(stream.withdrawn_amount);
 
         if withdrawal_amount > available {
@@ -987,7 +987,7 @@ impl Contract {
         }
 
         let now = env.ledger().timestamp();
-        let unlocked = Self::calculate_unlocked_internal(&stream, now);
+        let unlocked = Self::calculate_unlocked_internal(&stream, Self::ledger_timestamp_nanos(&env));
         let earned = unlocked.saturating_sub(stream.withdrawn_amount);
         let sender_remaining = stream.total_amount.saturating_sub(unlocked);
 
@@ -1134,49 +1134,65 @@ impl Contract {
         Ok(())
     }
 
-    fn calculate_unlocked_internal(stream: &StreamV2, now: u64) -> i128 {
-        if now < stream.cliff_time || now <= stream.start_time {
+    /// Calculate the unlocked token amount for a stream at time `now_nanos`.
+    ///
+    /// `now_nanos` must be in **nanoseconds** (use `ledger_timestamp_nanos`).
+    /// Stream times (`start_time`, `end_time`, `cliff_time`) are stored in
+    /// seconds and are converted to nanoseconds internally. This ensures the
+    /// function is forward-compatible with true sub-second ledger timestamps:
+    /// when the SDK exposes `timestamp_nanos()`, only `ledger_timestamp_nanos`
+    /// needs updating — the arithmetic here is already in the nanosecond domain.
+    fn calculate_unlocked_internal(stream: &StreamV2, now_nanos: u64) -> i128 {
+        let nps = math::NANOS_PER_SEC;
+        let cliff_nanos = stream.cliff_time * nps;
+        let start_nanos = stream.start_time * nps;
+        let end_nanos = stream.end_time * nps;
+
+        if now_nanos < cliff_nanos || now_nanos <= start_nanos {
             return 0;
         }
-        if now >= stream.end_time {
+        if now_nanos >= end_nanos {
             return stream.total_amount;
         }
         if stream.cancelled {
             return stream.total_amount;
         }
 
+        let elapsed = (now_nanos - start_nanos) as i128;
+        let duration = (end_nanos - start_nanos) as i128;
+
         if stream.step_duration > 0 {
-            let elapsed = (now - stream.start_time) as i128;
-            let duration = (stream.end_time - stream.start_time) as i128;
-            let step_duration = stream.step_duration;
-            let n_steps = (elapsed / step_duration) as u32;
-            let delta_t = elapsed % step_duration;
+            // step_duration is in seconds; convert to nanos for consistent units.
+            let step_duration_nanos = stream.step_duration * nps as i128;
+            let n_steps = (elapsed / step_duration_nanos) as u32;
+            let delta_t = elapsed % step_duration_nanos;
 
             let m_bps = stream.multiplier_bps;
             let q_bps = 10000 + m_bps;
 
-            let total_steps = (duration / step_duration) as u32;
+            let total_steps = (duration / step_duration_nanos) as u32;
 
             let q_pow_total = Self::power_scale(q_bps, total_steps);
             let q_pow_n = Self::power_scale(q_bps, n_steps);
 
             let scale = 1_000_000_000_i128;
 
-            let term1 = (q_pow_n - scale) * step_duration;
+            let term1 = (q_pow_n - scale) * step_duration_nanos;
             let term2 = (q_pow_n * delta_t * m_bps) / 10000;
 
             let numerator = stream.total_amount * (term1 + term2);
-            let denominator = (q_pow_total - scale) * step_duration;
+            let denominator = (q_pow_total - scale) * step_duration_nanos;
 
             if denominator <= 0 {
-                return (stream.total_amount * elapsed) / duration;
+                // Degenerate escalating config — fall back to smooth linear flow.
+                return math::calculate_flow(stream.total_amount, duration, elapsed);
             }
 
             numerator / denominator
         } else {
-            let elapsed = (now - stream.start_time) as i128;
-            let duration = (stream.end_time - stream.start_time) as i128;
-            (stream.total_amount * elapsed) / duration
+            // Issue #403 — Smooth-Flow: use calculate_flow (backed by mul_div)
+            // for overflow-safe, precision-preserving linear unlocking.
+            math::calculate_flow(stream.total_amount, duration, elapsed)
         }
     }
 
@@ -1221,7 +1237,7 @@ impl Contract {
         let now = env.ledger().timestamp();
 
         // Checkpoint: calculate what's already unlocked so the rate stays consistent.
-        let unlocked_at_now = Self::calculate_unlocked_internal(&stream, now);
+        let unlocked_at_now = Self::calculate_unlocked_internal(&stream, Self::ledger_timestamp_nanos(&env));
         let remaining = stream.total_amount.saturating_sub(unlocked_at_now);
 
         // Pull the new funds into the contract.
@@ -1485,6 +1501,18 @@ impl Contract {
             return Err(Error::EmergencyMode);
         }
         Ok(())
+    }
+
+    /// Return the current ledger time in nanoseconds.
+    ///
+    /// When the Soroban SDK exposes `ledger().timestamp_nanos()` this can be
+    /// swapped to that call directly. Until then, multiply the second-level
+    /// timestamp by `NANOS_PER_SEC` so that `calculate_flow` and
+    /// `calculate_unlocked_internal` already operate in the nanosecond domain
+    /// and will gain true sub-second precision without further changes.
+    #[inline]
+    fn ledger_timestamp_nanos(env: &Env) -> u64 {
+        env.ledger().timestamp() * math::NANOS_PER_SEC
     }
 
     /// If a compliance oracle is configured, verify `addr` is not flagged.
