@@ -331,3 +331,40 @@ pub struct FeesWithdrawnEvent {
     pub amount: i128,
     pub timestamp: u64,
 }
+
+// ----------------------------------------------------------------
+// Issue #408 — Multi-sig Transaction Buffer (Stream Request Approval)
+// ----------------------------------------------------------------
+
+/// Event emitted when a stream creation request is initiated
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamRequestInitiatedEvent {
+    pub request_id: u64,
+    pub sender: Address,
+    pub receiver: Address,
+    pub token: Address,
+    pub total_amount: i128,
+    pub threshold: u32,
+    pub timestamp: u64,
+}
+
+/// Event emitted when an admin approves a stream request
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamRequestApprovedEvent {
+    pub request_id: u64,
+    pub approver: Address,
+    pub approvals: u32,
+    pub threshold: u32,
+    pub timestamp: u64,
+}
+
+/// Event emitted when a stream request is executed (after threshold met)
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamRequestExecutedEvent {
+    pub request_id: u64,
+    pub stream_id: u64,
+    pub timestamp: u64,
+}

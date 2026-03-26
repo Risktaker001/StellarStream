@@ -16,7 +16,8 @@ pub use types::{
     MigrationEvent, NebulaEvent, Operation, OperationExecutedEvent, OperationScheduledEvent,
     PermitArgs, PermitStreamCreatedEvent, StreamArgs, StreamBatchEntry, StreamCancelledV2Event,
     StreamClaimV2Event, StreamCreatedV2Event, StreamMigratedEvent, StreamRefilledEvent,
-    StreamStatus, StreamToppedUpEvent, StreamV2,
+    StreamStatus, StreamToppedUpEvent, StreamV2, StreamRequestInitiatedEvent,
+    StreamRequestApprovedEvent, StreamRequestExecutedEvent,
 };
 use v1_interface::Client as V1Client;
 
@@ -409,6 +410,8 @@ impl Contract {
         stream_id: u64,
         withdrawal_amount: i128,
         relayer_fee: i128,
+        relayer: Address,
+        beneficiary_pubkey: soroban_sdk::BytesN<32>,
         nonce: u64,
         deadline: u64,
         signature: soroban_sdk::BytesN<64>,
@@ -462,12 +465,8 @@ impl Contract {
 
         let msg_hash: soroban_sdk::BytesN<32> = env.crypto().sha256(&msg).into();
 
-        // Extract the public key from the beneficiary address
-        // Note: This assumes the beneficiary is an account (not a contract)
-        let beneficiary_pubkey = match stream.beneficiary.clone() {
-            Address::Account(acc) => acc.0,
-            Address::Contract(_) => return Err(Error::InvalidSignature),
-        };
+        // Use the provided beneficiary public key for signature verification
+        let beneficiary_pubkey = beneficiary_pubkey.clone();
 
         // Verify the signature
         env.crypto()
@@ -494,7 +493,6 @@ impl Contract {
 
         // Calculate amounts
         let to_receiver = withdrawal_amount - relayer_fee;
-        let relayer = env.invoker();
 
         // Perform transfers
         let token_client = soroban_sdk::token::TokenClient::new(&env, &stream.token);
@@ -522,7 +520,6 @@ impl Contract {
         let mut data = Vec::new(&env);
         data.push_back(stream_id.into_val(&env));
         data.push_back(stream.beneficiary.clone().into_val(&env));
-        data.push_back(relayer.clone().into_val(&env));
         data.push_back(to_receiver.into_val(&env));
         data.push_back(relayer_fee.into_val(&env));
         data.push_back(now.into_val(&env));
@@ -877,15 +874,15 @@ impl Contract {
 
         let now = env.ledger().timestamp();
         let action = if paused {
-            symbol_short!("mig_pause")
+            symbol_short!("mig_paus")
         } else {
-            symbol_short!("mig_unpaus")
+            symbol_short!("mig_unps")
         };
         let mut data = Vec::new(&env);
         data.push_back(admin.clone().into_val(&env));
         data.push_back(now.into_val(&env));
         env.events().publish(
-            (action, admin.clone()),
+            (action.clone(), admin.clone()),
             NebulaEvent {
                 version: 2,
                 timestamp: now,
@@ -982,6 +979,8 @@ impl Contract {
             return Err(Error::AssetNotWhitelisted);
         }
         Ok(())
+    }
+
     fn apply_protocol_fee(env: &Env, token: &Address, total_amount: i128) -> Result<i128, Error> {
         let fee_bps = storage::get_fee_bps(env);
         if fee_bps == 0 {
@@ -1336,6 +1335,244 @@ impl Contract {
         );
 
         Ok(stream_ids)
+    }
+
+    // ----------------------------------------------------------------
+    // Issue #408 — Multi-sig Transaction Buffer (Stream Request Approval)
+    // ----------------------------------------------------------------
+
+    /// Initiate a stream request that requires multi-sig approval before execution.
+    /// This stores the stream parameters and sets approvals = 1 (first approval from initiator).
+    ///
+    /// The stream will only be created once the approval threshold is met.
+    pub fn initiate_stream_request(env: Env, args: StreamArgs) -> Result<u64, Error> {
+        Self::require_not_paused(&env)?;
+        args.sender.require_auth();
+        Self::require_asset_whitelisted(&env, &args.token)?;
+
+        // Validate time range
+        if args.start_time >= args.end_time
+            || args.cliff_time < args.start_time
+            || args.cliff_time > args.end_time
+        {
+            return Err(Error::InvalidTimeRange);
+        }
+
+        // Validate penalty
+        if args.penalty_bps > 10_000 {
+            return Err(Error::InvalidPenalty);
+        }
+
+        // Validate dust threshold
+        if args.total_amount < storage::get_min_value(&env, &args.token) {
+            return Err(Error::BelowDustThreshold);
+        }
+
+        let request_id = storage::next_stream_request_id(&env);
+        let threshold = storage::get_threshold(&env);
+
+        // Create pending request with first approval from the sender
+        let mut approved_by = Vec::new(&env);
+        approved_by.push_back(args.sender.clone());
+
+        let request = storage::PendingStreamRequest {
+            args: args.clone(),
+            approvals: 1,
+            approved_by,
+            created_at: env.ledger().timestamp(),
+            executed: false,
+        };
+
+        storage::set_pending_stream_request(&env, request_id, &request);
+
+        let now = env.ledger().timestamp();
+        let mut data = Vec::new(&env);
+        data.push_back(request_id.into_val(&env));
+        data.push_back(args.sender.clone().into_val(&env));
+        data.push_back(args.receiver.clone().into_val(&env));
+        data.push_back(args.token.clone().into_val(&env));
+        data.push_back(args.total_amount.into_val(&env));
+        data.push_back(threshold.into_val(&env));
+        data.push_back(now.into_val(&env));
+
+        env.events().publish(
+            (symbol_short!("req_init"), request_id),
+            NebulaEvent {
+                version: 2,
+                timestamp: now,
+                action: symbol_short!("req_init"),
+                data,
+            },
+        );
+
+        Ok(request_id)
+    }
+
+    /// Approve a pending stream request. When approvals reach the threshold,
+    /// the stream is automatically created.
+    pub fn approve_stream_request(env: Env, request_id: u64, approver: Address) -> Result<u64, Error> {
+        Self::require_not_paused(&env)?;
+
+        // Get the admin list and threshold
+        let admin_list = storage::get_admin_list(&env);
+        let threshold = storage::get_threshold(&env);
+        
+        // Verify the approver is in the admin list and require auth
+        if !admin_list.contains(&approver) {
+            return Err(Error::NotEnoughSigners);
+        }
+        approver.require_auth();
+
+        // Get the pending request
+        let mut request = storage::get_pending_stream_request(&env, request_id)
+            .ok_or(Error::StreamRequestNotFound)?;
+
+        // Check if already executed
+        if request.executed {
+            return Err(Error::StreamRequestAlreadyExecuted);
+        }
+
+        // Check if already approved by this admin
+        if request.approved_by.contains(&approver) {
+            return Err(Error::AlreadyApproved);
+        }
+
+        // Add approval
+        request.approvals += 1;
+        request.approved_by.push_back(approver.clone());
+
+        let now = env.ledger().timestamp();
+
+        // If threshold reached, execute the stream creation
+        if request.approvals >= threshold {
+            request.executed = true;
+            storage::set_pending_stream_request(&env, request_id, &request);
+
+            // Execute the stream creation
+            let stream_id = Self::execute_stream_creation_internal(&env, request.args)?;
+
+            // Remove the pending request
+            storage::remove_pending_stream_request(&env, request_id);
+
+            let mut data = Vec::new(&env);
+            data.push_back(request_id.into_val(&env));
+            data.push_back(stream_id.into_val(&env));
+            data.push_back(now.into_val(&env));
+
+            env.events().publish(
+                (symbol_short!("req_exec"), request_id),
+                NebulaEvent {
+                    version: 2,
+                    timestamp: now,
+                    action: symbol_short!("req_exec"),
+                    data,
+                },
+            );
+
+            Ok(stream_id)
+        } else {
+            // Update the pending request with new approval
+            storage::set_pending_stream_request(&env, request_id, &request);
+
+            let mut data = Vec::new(&env);
+            data.push_back(request_id.into_val(&env));
+            data.push_back(approver.clone().into_val(&env));
+            data.push_back(request.approvals.into_val(&env));
+            data.push_back(threshold.into_val(&env));
+            data.push_back(now.into_val(&env));
+
+            env.events().publish(
+                (symbol_short!("req_appr"), request_id),
+                NebulaEvent {
+                    version: 2,
+                    timestamp: now,
+                    action: symbol_short!("req_appr"),
+                    data,
+                },
+            );
+
+            Ok(0) // Return 0 to indicate request not yet executed, but approval recorded
+        }
+    }
+
+    /// Get a pending stream request details
+    pub fn get_stream_request(env: Env, request_id: u64) -> Option<storage::PendingStreamRequest> {
+        storage::get_pending_stream_request(&env, request_id)
+    }
+
+    /// Internal helper to execute stream creation (used by approve_stream_request)
+    fn execute_stream_creation_internal(env: &Env, args: StreamArgs) -> Result<u64, Error> {
+        // Transfer tokens from sender
+        let token_client = soroban_sdk::token::TokenClient::new(env, &args.token);
+        token_client.transfer(
+            &args.sender,
+            &env.current_contract_address(),
+            &args.total_amount,
+        );
+
+        let stream_amount = Self::apply_protocol_fee(env, &args.token, args.total_amount)?;
+
+        let stream_id = storage::next_stream_id(env);
+
+        let mut vault_used = None;
+        if args.yield_enabled {
+            if let Some(vault_addr) = &args.vault_address {
+                let vault_client = VaultClient::new(env, vault_addr);
+                vault_client.deposit(&stream_amount);
+                vault_used = Some(vault_addr.clone());
+            }
+        }
+
+        let stream = StreamV2 {
+            sender: args.sender.clone(),
+            receiver: args.receiver.clone(),
+            beneficiary: args.receiver.clone(),
+            token: args.token.clone(),
+            total_amount: stream_amount,
+            start_time: args.start_time,
+            end_time: args.end_time,
+            cliff_time: args.cliff_time,
+            withdrawn_amount: 0,
+            cancelled: false,
+            migrated_from_v1: false,
+            v1_stream_id: 0,
+            step_duration: args.step_duration,
+            multiplier_bps: args.multiplier_bps,
+            penalty_bps: args.penalty_bps,
+            vault_address: vault_used,
+            yield_enabled: args.yield_enabled,
+            is_pending: false,
+            is_recurrent: args.is_recurrent,
+            cycle_duration: args.cycle_duration,
+            cancellation_type: args.cancellation_type,
+        };
+
+        storage::set_stream(env, stream_id, &stream);
+        storage::update_stats(env, stream_amount, &args.sender, &args.receiver);
+
+        let now = env.ledger().timestamp();
+        let mut data = Vec::new(env);
+        data.push_back(stream_id.into_val(env));
+        data.push_back(args.sender.clone().into_val(env));
+        data.push_back(args.receiver.clone().into_val(env));
+        data.push_back(args.token.clone().into_val(env));
+        data.push_back(stream_amount.into_val(env));
+        data.push_back(args.start_time.into_val(env));
+        data.push_back(args.cliff_time.into_val(env));
+        data.push_back(args.end_time.into_val(env));
+        data.push_back(now.into_val(env));
+
+        env.events().publish(
+            (stream_id, symbol_short!("create_v2")),
+            NebulaEvent {
+                version: 2,
+                timestamp: now,
+                action: symbol_short!("create_v2"),
+                data,
+            },
+        );
+
+        Ok(stream_id)
     }
 
     // ----------------------------------------------------------------

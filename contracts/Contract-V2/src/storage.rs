@@ -80,6 +80,12 @@ pub enum DataKeyV2 {
     // -- Migration pause -----------------------------------------
     /// When true, migrate_stream is blocked while standard V2 ops remain live.
     MigrationPaused, // 12
+
+    // -- Pending Stream Requests (Multi-sig Approval) -----------------
+    /// Pending stream request by ID
+    PendingStreamRequest(u64), // 13
+    /// Counter for generating unique pending stream request IDs
+    StreamRequestCount, // 14
 }
 
 /// Global stream counter.
@@ -551,4 +557,49 @@ pub fn is_asset_whitelisted(env: &Env, asset: &Address) -> bool {
         .instance()
         .get(&DataKeyV2::WhitelistedAsset(asset.clone()))
         .unwrap_or(false)
+}
+
+// ----------------------------------------------------------------
+// Pending Stream Requests (Multi-sig Approval)
+// ----------------------------------------------------------------
+
+/// Stored pending stream request waiting for multi-sig approval
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingStreamRequest {
+    pub args: crate::types::StreamArgs,
+    pub approvals: u32,
+    pub approved_by: Vec<Address>,
+    pub created_at: u64,
+    pub executed: bool,
+}
+
+/// Generate the next pending stream request ID
+pub fn next_stream_request_id(env: &Env) -> u64 {
+    let id: u64 = env.storage().instance().get(&DataKeyV2::StreamRequestCount).unwrap_or(0);
+    env.storage().instance().set(&DataKeyV2::StreamRequestCount, &(id + 1));
+    id
+}
+
+/// Store a pending stream request
+pub fn set_pending_stream_request(env: &Env, request_id: u64, request: &PendingStreamRequest) {
+    env.storage()
+        .instance()
+        .set(&DataKeyV2::PendingStreamRequest(request_id), request);
+    bump_instance(env);
+}
+
+/// Retrieve a pending stream request
+pub fn get_pending_stream_request(env: &Env, request_id: u64) -> Option<PendingStreamRequest> {
+    env.storage()
+        .instance()
+        .get(&DataKeyV2::PendingStreamRequest(request_id))
+}
+
+/// Remove a pending stream request after execution or cancellation
+pub fn remove_pending_stream_request(env: &Env, request_id: u64) {
+    env.storage()
+        .instance()
+        .remove(&DataKeyV2::PendingStreamRequest(request_id));
+    bump_instance(env);
 }

@@ -41,4 +41,12 @@ pub enum Error {
     MigrationPaused = 31,
     /// Relayer fee exceeds the available withdrawal amount
     InvalidRelayerFee = 32,
+    /// Stream request not found
+    StreamRequestNotFound = 33,
+    /// Stream request already approved by this admin
+    AlreadyApproved = 34,
+    /// Stream request has already been executed
+    StreamRequestAlreadyExecuted = 35,
+    /// Overflow in arithmetic operation
+    Overflow = 36,
 }
