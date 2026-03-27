@@ -2197,6 +2197,55 @@ fn test_split_stream_routes_bps_to_split_address() {
 }
 
 #[test]
+fn test_split_stream_rounding_dust_is_preserved_for_receiver() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let receiver = Address::generate(&env);
+    let tax_vault = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_id, token_client, asset_client) = create_token(&env, &token_admin);
+    let (_, v2_client) = setup_v2(&env, &admin);
+    v2_client.add_to_whitelist(&token_id);
+
+    asset_client.mint(&sender, &1_000_000_000);
+
+    let sid = v2_client.create_stream(&StreamArgs {
+        sender: sender.clone(),
+        receiver: receiver.clone(),
+        token: token_id.clone(),
+        total_amount: 101,
+        start_time: 0,
+        cliff_time: 0,
+        end_time: 1,
+        step_duration: 0,
+        multiplier_bps: 0,
+        penalty_bps: 0,
+        vault_address: None,
+        yield_enabled: false,
+        is_recurrent: false,
+        cycle_duration: 0,
+        cancellation_type: 0,
+        affiliate: None,
+        yield_recipient: 0,
+        split_address: None,
+        split_bps: 0,
+    });
+
+    v2_client.split_stream(&sid, &Some(tax_vault.clone()), &3333u32);
+
+    env.ledger().set_timestamp(1);
+    v2_client.withdraw(&sid, &receiver);
+
+    // split_amount = floor(101 * 3333 / 10000) = 33
+    // receiver gets 101 - 33 = 68 (dust 6633 stroops keeps with receiver)
+    assert_eq!(token_client.balance(&tax_vault), 33);
+    assert_eq!(token_client.balance(&receiver), 68);
+}
+
+#[test]
 fn test_split_stream_rejects_invalid_bps() {
     let env = Env::default();
     env.mock_all_auths();

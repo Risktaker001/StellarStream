@@ -1181,8 +1181,11 @@ impl Contract {
         let token_client = soroban_sdk::token::TokenClient::new(&env, &stream.token);
         let to_beneficiary = if stream.split_bps > 0 {
             if let Some(ref split_addr) = stream.split_address.clone() {
-                let split_amount = (to_withdraw * stream.split_bps as i128) / 10_000;
+                let calc_numerator = to_withdraw * stream.split_bps as i128;
+                let split_amount = calc_numerator / 10_000;
+                let dust_amount = calc_numerator % 10_000;
                 let remainder = to_withdraw - split_amount;
+
                 if split_amount > 0 {
                     token_client.transfer(
                         &env.current_contract_address(),
@@ -1190,6 +1193,33 @@ impl Contract {
                         &split_amount,
                     );
                 }
+
+                if dust_amount > 0 {
+                    let now = env.ledger().timestamp();
+                    let mut dust_data = Vec::new(&env);
+                    dust_data.push_back(stream_id.into_val(&env));
+                    dust_data.push_back(stream.token.clone().into_val(&env));
+                    dust_data.push_back(split_addr.clone().into_val(&env));
+                    dust_data.push_back(stream.split_bps.into_val(&env));
+                    dust_data.push_back(to_withdraw.into_val(&env));
+                    dust_data.push_back(split_amount.into_val(&env));
+                    dust_data.push_back(dust_amount.into_val(&env));
+                    dust_data.push_back(now.into_val(&env));
+                    env.events().publish(
+                        (stream_id, symbol_short!("dust")),
+                        DustAccumulatedEvent {
+                            stream_id,
+                            token: stream.token.clone(),
+                            split_address: split_addr.clone(),
+                            split_bps: stream.split_bps,
+                            to_withdraw,
+                            split_amount,
+                            dust_amount,
+                            timestamp: now,
+                        },
+                    );
+                }
+
                 remainder
             } else {
                 to_withdraw

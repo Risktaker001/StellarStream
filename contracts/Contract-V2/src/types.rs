@@ -243,6 +243,19 @@ pub struct StreamClaimV2Event {
 
 #[contracttype]
 #[derive(Clone, Debug)]
+pub struct DustAccumulatedEvent {
+    pub stream_id: u64,
+    pub token: Address,
+    pub split_address: Address,
+    pub split_bps: u32,
+    pub to_withdraw: i128,
+    pub split_amount: i128,
+    pub dust_amount: i128,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
 pub struct StreamCancelledV2Event {
     pub stream_id: u64,
     pub canceller: Address,
