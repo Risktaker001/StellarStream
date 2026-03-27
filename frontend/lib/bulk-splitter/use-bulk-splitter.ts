@@ -8,10 +8,24 @@ import type { Voter, Recipient } from './types';
 
 export type BulkSplitterStatus = 'idle' | 'parsing' | 'calculating' | 'ready' | 'error';
 
+/** Per-batch execution status */
+export type BatchStatus = 'idle' | 'pending' | 'success' | 'error';
+
+export interface BatchState {
+  recipients: Recipient[];
+  status: BatchStatus;
+  /** Transaction hash on success */
+  txHash?: string;
+  /** Error message on failure */
+  error?: string;
+}
+
 export interface UseBulkSplitterReturn {
   status: BulkSplitterStatus;
   voters: Voter[];
   batches: Recipient[][];
+  /** Per-batch execution state — populated after dispatch begins. */
+  batchStates: BatchState[];
   /** Total number of recipients across all batches. */
   totalRecipients: number;
   error: string | null;
@@ -19,6 +33,16 @@ export interface UseBulkSplitterReturn {
   parse: (rawData: string) => void;
   /** Calculate rewards via the Web Worker once voters are loaded. */
   calculate: (totalReward: bigint, batchSize?: number) => void;
+  /**
+   * Dispatch all idle batches sequentially.
+   * `submitBatch` receives the recipients for one batch and must return a tx hash.
+   */
+  dispatch: (submitBatch: (recipients: Recipient[]) => Promise<string>) => Promise<void>;
+  /**
+   * Re-dispatch only batches whose status is 'error' or 'idle'.
+   * Batches that already succeeded are skipped — no duplicate payments.
+   */
+  retryFailed: (submitBatch: (recipients: Recipient[]) => Promise<string>) => Promise<void>;
   reset: () => void;
 }
 
@@ -26,6 +50,7 @@ export function useBulkSplitter(): UseBulkSplitterReturn {
   const [status, setStatus] = useState<BulkSplitterStatus>('idle');
   const [voters, setVoters] = useState<Voter[]>([]);
   const [batches, setBatches] = useState<Recipient[][]>([]);
+  const [batchStates, setBatchStates] = useState<BatchState[]>([]);
   const [error, setError] = useState<string | null>(null);
   const workerRef = useRef<Worker | null>(null);
 
@@ -84,7 +109,10 @@ export function useBulkSplitter(): UseBulkSplitterReturn {
               amount: BigInt(r.amount),
             }),
           );
-          setBatches(chunkRecipients(recipients, batchSize));
+          const chunks = chunkRecipients(recipients, batchSize);
+          setBatches(chunks);
+          // Initialise all batch states to idle
+          setBatchStates(chunks.map((b) => ({ recipients: b, status: 'idle' })));
           setStatus('ready');
         } else if (msg.type === 'error') {
           setError(msg.message);
@@ -106,12 +134,63 @@ export function useBulkSplitter(): UseBulkSplitterReturn {
     [voters, getWorker],
   );
 
+  /** Run `submitBatch` for every batch whose index is in `indices`. */
+  const runBatches = useCallback(
+    async (
+      indices: number[],
+      submitBatch: (recipients: Recipient[]) => Promise<string>,
+    ) => {
+      for (const i of indices) {
+        // Mark as pending
+        setBatchStates((prev) =>
+          prev.map((b, idx) => (idx === i ? { ...b, status: 'pending', error: undefined } : b)),
+        );
+        try {
+          const txHash = await submitBatch(batchStates[i]?.recipients ?? batches[i]);
+          setBatchStates((prev) =>
+            prev.map((b, idx) => (idx === i ? { ...b, status: 'success', txHash } : b)),
+          );
+        } catch (err) {
+          setBatchStates((prev) =>
+            prev.map((b, idx) =>
+              idx === i
+                ? { ...b, status: 'error', error: err instanceof Error ? err.message : String(err) }
+                : b,
+            ),
+          );
+        }
+      }
+    },
+    [batches, batchStates],
+  );
+
+  const dispatch = useCallback(
+    async (submitBatch: (recipients: Recipient[]) => Promise<string>) => {
+      const indices = batches.map((_, i) => i);
+      await runBatches(indices, submitBatch);
+    },
+    [batches, runBatches],
+  );
+
+  const retryFailed = useCallback(
+    async (submitBatch: (recipients: Recipient[]) => Promise<string>) => {
+      // Only retry batches that are not yet successful — prevents duplicate payments
+      const indices = batchStates
+        .map((b, i) => ({ b, i }))
+        .filter(({ b }) => b.status === 'error' || b.status === 'idle')
+        .map(({ i }) => i);
+      await runBatches(indices, submitBatch);
+    },
+    [batchStates, runBatches],
+  );
+
   const reset = useCallback(() => {
     workerRef.current?.terminate();
     workerRef.current = null;
     setStatus('idle');
     setVoters([]);
     setBatches([]);
+    setBatchStates([]);
     setError(null);
   }, []);
 
@@ -119,10 +198,13 @@ export function useBulkSplitter(): UseBulkSplitterReturn {
     status,
     voters,
     batches,
+    batchStates,
     totalRecipients: batches.reduce((acc, b) => acc + b.length, 0),
     error,
     parse,
     calculate,
+    dispatch,
+    retryFailed,
     reset,
   };
 }
