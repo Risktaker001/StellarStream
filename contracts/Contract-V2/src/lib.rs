@@ -50,6 +50,13 @@ pub trait ComplianceTrait {
     fn is_allowed(env: Env, addr: Address) -> bool;
 }
 
+/// Nebula-DAO governance token interface.
+/// Used to query an address's token balance as a proxy for voting power.
+#[soroban_sdk::contractclient(name = "DaoTokenClient")]
+pub trait DaoTokenTrait {
+    fn balance(env: Env, id: Address) -> i128;
+}
+
 #[contractimpl]
 impl Contract {
     // ----------------------------------------------------------------
@@ -451,6 +458,11 @@ impl Contract {
         }
         caller.require_auth();
 
+        // Issue #399 — replay-attack prevention
+        if storage::is_v1_migrated(&env, v1_stream_id) {
+            return Err(Error::AlreadyMigrated);
+        }
+
         let v1_client = V1Client::new(&env, &v1_contract);
 
         let v1_stream = v1_client
@@ -523,6 +535,8 @@ impl Contract {
 
         storage::set_stream(&env, v2_stream_id, &v2_stream);
         storage::update_stats(&env, remaining, &v1_stream.sender, &caller);
+        // Issue #399 — record migration so the same V1 stream cannot be migrated again
+        storage::mark_v1_migrated(&env, v1_stream_id);
 
         let mut data = Vec::new(&env);
         data.push_back(v2_stream_id.into_val(&env));
@@ -565,6 +579,11 @@ impl Contract {
         // Note: For hackathon/simplicity, we assume the Symbol matches the numeric ID.
         // In production, this would use a more robust parsing utility.
         let v1_stream_id = Self::parse_symbol_to_u64(&v1_id);
+
+        // Issue #399 — replay-attack prevention
+        if storage::is_v1_migrated(&env, v1_stream_id) {
+            return Err(Error::AlreadyMigrated);
+        }
 
         let v1_client = V1Client::new(&env, &v1_contract);
 
@@ -623,6 +642,8 @@ impl Contract {
 
         storage::set_stream(&env, v2_stream_id, &v2_stream);
         storage::update_stats(&env, remaining_balance, &v1_stream.sender, &caller);
+        // Issue #399 — record migration so the same V1 stream cannot be migrated again
+        storage::mark_v1_migrated(&env, v1_stream_id);
 
         // Emit standardized Nebula migration event
         let mut data = Vec::new(&env);
@@ -662,11 +683,11 @@ impl Contract {
         }
 
         let mut results = Vec::new(&env);
-        let now = env.ledger().timestamp();
+        let now_nanos = Self::ledger_timestamp_nanos(&env);
 
         for id in ids.iter() {
             if let Some(stream) = storage::get_stream(&env, id) {
-                let unlocked = Self::calculate_unlocked_internal(&stream, now);
+                let unlocked = Self::calculate_unlocked_internal(&stream, now_nanos);
                 let remaining_unlocked = unlocked.saturating_sub(stream.withdrawn_amount);
 
                 let status = if stream.cancelled {
@@ -897,8 +918,8 @@ impl Contract {
             return Err(Error::InvalidNonce);
         }
 
-        // Calculate unlocked amount
-        let unlocked = Self::calculate_unlocked_internal(&stream, now);
+        // Calculate unlocked amount (Issue #403 — nanosecond domain)
+        let unlocked = Self::calculate_unlocked_internal(&stream, Self::ledger_timestamp_nanos(&env));
         let available = unlocked.saturating_sub(stream.withdrawn_amount);
 
         if withdrawal_amount > available {
@@ -1044,7 +1065,7 @@ impl Contract {
         }
 
         let now = env.ledger().timestamp();
-        let unlocked = Self::calculate_unlocked_internal(&stream, now);
+        let unlocked = Self::calculate_unlocked_internal(&stream, Self::ledger_timestamp_nanos(&env));
         let earned = unlocked.saturating_sub(stream.withdrawn_amount);
         let sender_remaining = stream.total_amount.saturating_sub(unlocked);
 
@@ -1191,49 +1212,65 @@ impl Contract {
         Ok(())
     }
 
-    fn calculate_unlocked_internal(stream: &StreamV2, now: u64) -> i128 {
-        if now < stream.cliff_time || now <= stream.start_time {
+    /// Calculate the unlocked token amount for a stream at time `now_nanos`.
+    ///
+    /// `now_nanos` must be in **nanoseconds** (use `ledger_timestamp_nanos`).
+    /// Stream times (`start_time`, `end_time`, `cliff_time`) are stored in
+    /// seconds and are converted to nanoseconds internally. This ensures the
+    /// function is forward-compatible with true sub-second ledger timestamps:
+    /// when the SDK exposes `timestamp_nanos()`, only `ledger_timestamp_nanos`
+    /// needs updating — the arithmetic here is already in the nanosecond domain.
+    fn calculate_unlocked_internal(stream: &StreamV2, now_nanos: u64) -> i128 {
+        let nps = math::NANOS_PER_SEC;
+        let cliff_nanos = stream.cliff_time * nps;
+        let start_nanos = stream.start_time * nps;
+        let end_nanos = stream.end_time * nps;
+
+        if now_nanos < cliff_nanos || now_nanos <= start_nanos {
             return 0;
         }
-        if now >= stream.end_time {
+        if now_nanos >= end_nanos {
             return stream.total_amount;
         }
         if stream.cancelled {
             return stream.total_amount;
         }
 
+        let elapsed = (now_nanos - start_nanos) as i128;
+        let duration = (end_nanos - start_nanos) as i128;
+
         if stream.step_duration > 0 {
-            let elapsed = (now - stream.start_time) as i128;
-            let duration = (stream.end_time - stream.start_time) as i128;
-            let step_duration = stream.step_duration;
-            let n_steps = (elapsed / step_duration) as u32;
-            let delta_t = elapsed % step_duration;
+            // step_duration is in seconds; convert to nanos for consistent units.
+            let step_duration_nanos = stream.step_duration * nps as i128;
+            let n_steps = (elapsed / step_duration_nanos) as u32;
+            let delta_t = elapsed % step_duration_nanos;
 
             let m_bps = stream.multiplier_bps;
             let q_bps = 10000 + m_bps;
 
-            let total_steps = (duration / step_duration) as u32;
+            let total_steps = (duration / step_duration_nanos) as u32;
 
             let q_pow_total = Self::power_scale(q_bps, total_steps);
             let q_pow_n = Self::power_scale(q_bps, n_steps);
 
             let scale = 1_000_000_000_i128;
 
-            let term1 = (q_pow_n - scale) * step_duration;
+            let term1 = (q_pow_n - scale) * step_duration_nanos;
             let term2 = (q_pow_n * delta_t * m_bps) / 10000;
 
             let numerator = stream.total_amount * (term1 + term2);
-            let denominator = (q_pow_total - scale) * step_duration;
+            let denominator = (q_pow_total - scale) * step_duration_nanos;
 
             if denominator <= 0 {
-                return (stream.total_amount * elapsed) / duration;
+                // Degenerate escalating config — fall back to smooth linear flow.
+                return math::calculate_flow(stream.total_amount, duration, elapsed);
             }
 
             numerator / denominator
         } else {
-            let elapsed = (now - stream.start_time) as i128;
-            let duration = (stream.end_time - stream.start_time) as i128;
-            (stream.total_amount * elapsed) / duration
+            // Issue #403 — Smooth-Flow: use calculate_flow (backed by mul_div)
+            // for overflow-safe, precision-preserving linear unlocking.
+            math::calculate_flow(stream.total_amount, duration, elapsed)
         }
     }
 
@@ -1289,6 +1326,7 @@ impl Contract {
         extra_amount: i128,
     ) -> Result<(), Error> {
         Self::require_not_paused(&env)?;
+        Self::require_not_emergency(&env)?;
         sender.require_auth();
 
         if extra_amount <= 0 {
@@ -1308,7 +1346,7 @@ impl Contract {
         let now = env.ledger().timestamp();
 
         // Checkpoint: calculate what's already unlocked so the rate stays consistent.
-        let unlocked_at_now = Self::calculate_unlocked_internal(&stream, now);
+        let unlocked_at_now = Self::calculate_unlocked_internal(&stream, Self::ledger_timestamp_nanos(&env));
         let remaining = stream.total_amount.saturating_sub(unlocked_at_now);
 
         // Pull the new funds into the contract.
@@ -1420,6 +1458,37 @@ impl Contract {
 
     pub fn is_paused(env: Env) -> bool {
         storage::is_paused(&env)
+    }
+
+    // ----------------------------------------------------------------
+    // Issue #393 — Emergency (withdraw-only) Mode
+    // ----------------------------------------------------------------
+
+    /// Activate emergency mode: blocks create_stream and top_up while
+    /// leaving withdraw accessible so beneficiaries can always exit.
+    pub fn set_emergency_mode(env: Env, active: bool) -> Result<(), Error> {
+        let admin = storage::try_get_admin(&env)?;
+        admin.require_auth();
+        storage::set_emergency(&env, active);
+        let now = env.ledger().timestamp();
+        let mut data = Vec::new(&env);
+        data.push_back(admin.clone().into_val(&env));
+        data.push_back(active.into_val(&env));
+        data.push_back(now.into_val(&env));
+        env.events().publish(
+            (symbol_short!("emergency"), admin.clone()),
+            NebulaEvent {
+                version: 2,
+                timestamp: now,
+                action: symbol_short!("emergency"),
+                data,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn is_emergency_mode(env: Env) -> bool {
+        storage::is_emergency(&env)
     }
 
     // ----------------------------------------------------------------
@@ -1564,6 +1633,25 @@ impl Contract {
         Ok(())
     }
 
+    fn require_not_emergency(env: &Env) -> Result<(), Error> {
+        if storage::is_emergency(env) {
+            return Err(Error::EmergencyMode);
+        }
+        Ok(())
+    }
+
+    /// Return the current ledger time in nanoseconds.
+    ///
+    /// When the Soroban SDK exposes `ledger().timestamp_nanos()` this can be
+    /// swapped to that call directly. Until then, multiply the second-level
+    /// timestamp by `NANOS_PER_SEC` so that `calculate_flow` and
+    /// `calculate_unlocked_internal` already operate in the nanosecond domain
+    /// and will gain true sub-second precision without further changes.
+    #[inline]
+    fn ledger_timestamp_nanos(env: &Env) -> u64 {
+        env.ledger().timestamp() * math::NANOS_PER_SEC
+    }
+
     /// If a compliance oracle is configured, verify `addr` is not flagged.
     fn require_compliant(env: &Env, addr: &Address) -> Result<(), Error> {
         if let Some(oracle_addr) = storage::get_compliance_oracle(env) {
@@ -1645,6 +1733,7 @@ impl Contract {
     /// - `InvalidPenalty`: If penalty basis points exceed 10,000
     pub fn create_stream(env: Env, args: StreamArgs) -> Result<u64, Error> {
         Self::require_not_paused(&env)?;
+        Self::require_not_emergency(&env)?;
         args.sender.require_auth();
         Self::require_asset_whitelisted(&env, &args.token)?;
 
@@ -2507,6 +2596,190 @@ impl Contract {
     pub fn get_withdrawal_nonce(env: Env, beneficiary: Address, stream_id: u64) -> u64 {
         let nonce_key = (symbol_short!("W_NONCE"), beneficiary, stream_id);
         env.storage().instance().get(&nonce_key).unwrap_or(0u64)
+    }
+
+    // ----------------------------------------------------------------
+    // Nebula-DAO Vote-Weight Integration (Issue: Governance)
+    // ----------------------------------------------------------------
+
+    /// Set the DAO governance token contract address. Admin-only.
+    pub fn set_dao_token(env: Env, token: Address) -> Result<(), Error> {
+        storage::try_get_admin(&env)?.require_auth();
+        storage::set_dao_token(&env, &token);
+        Ok(())
+    }
+
+    /// Set the minimum voting power threshold for treasury splits. Admin-only.
+    pub fn set_voting_threshold(env: Env, threshold: i128) -> Result<(), Error> {
+        storage::try_get_admin(&env)?.require_auth();
+        storage::set_voting_threshold(&env, threshold);
+        Ok(())
+    }
+
+    /// Query the DAO token balance of `addr` as a proxy for voting power.
+    /// Returns `Err(DaoTokenNotSet)` if no DAO token has been configured.
+    pub fn check_voting_power(env: Env, addr: Address) -> Result<i128, Error> {
+        let dao_token = storage::get_dao_token(&env).ok_or(Error::DaoTokenNotSet)?;
+        let client = DaoTokenClient::new(&env, &dao_token);
+        Ok(client.balance(&addr))
+    }
+
+    /// Execute an admin-only split from the Treasury account.
+    ///
+    /// The caller must hold DAO token balance >= the configured voting threshold.
+    /// Funds are transferred from the treasury address to each recipient.
+    ///
+    /// # Parameters
+    /// - `caller`: The address initiating the split (must have sufficient voting power).
+    /// - `token`: The token to distribute.
+    /// - `recipients`: List of recipient addresses.
+    /// - `amounts`: Corresponding amounts for each recipient.
+    pub fn treasury_split_by_vote(
+        env: Env,
+        caller: Address,
+        token: Address,
+        recipients: Vec<Address>,
+        amounts: Vec<i128>,
+    ) -> Result<(), Error> {
+        caller.require_auth();
+
+        // Check voting power
+        let voting_power = Self::check_voting_power(env.clone(), caller.clone())?;
+        let threshold = storage::get_voting_threshold(&env);
+        if voting_power < threshold {
+            return Err(Error::InsufficientVotingPower);
+        }
+
+        let treasury = storage::get_treasury(&env).ok_or(Error::NoTreasury)?;
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &token);
+
+        for i in 0..recipients.len() {
+            let recipient = recipients.get(i).unwrap();
+            let amount = amounts.get(i).unwrap();
+            token_client.transfer(&treasury, &recipient, &amount);
+        }
+
+        let now = env.ledger().timestamp();
+        let mut data = Vec::new(&env);
+        data.push_back(caller.into_val(&env));
+        data.push_back(token.clone().into_val(&env));
+        data.push_back(now.into_val(&env));
+
+        env.events().publish(
+            (symbol_short!("dao_split"), token),
+            NebulaEvent {
+                version: 2,
+                timestamp: now,
+                action: symbol_short!("dao_split"),
+                data,
+            },
+        );
+
+        Ok(())
+    }
+
+    // ----------------------------------------------------------------
+    // Timelocked Treasury Splits (Issue: Governance Security)
+    // ----------------------------------------------------------------
+
+    /// Initiate a treasury split. Starts the 48-hour community veto window.
+    ///
+    /// Returns the `split_id` that must be passed to `execute_treasury_split`
+    /// after the timelock expires.
+    pub fn initiate_treasury_split(
+        env: Env,
+        initiator: Address,
+        token: Address,
+        recipients: Vec<Address>,
+        amounts: Vec<i128>,
+    ) -> Result<u64, Error> {
+        initiator.require_auth();
+        storage::try_get_admin(&env)?.require_auth();
+
+        let unlock_time = env.ledger().timestamp() + storage::ADMIN_DELAY;
+        let split_id = storage::next_treasury_split_id(&env);
+
+        storage::set_pending_treasury_split(
+            &env,
+            split_id,
+            &storage::PendingTreasurySplit {
+                initiator: initiator.clone(),
+                token: token.clone(),
+                recipients,
+                amounts,
+                unlock_time,
+                executed: false,
+            },
+        );
+
+        let now = env.ledger().timestamp();
+        let mut data = Vec::new(&env);
+        data.push_back(split_id.into_val(&env));
+        data.push_back(initiator.into_val(&env));
+        data.push_back(token.into_val(&env));
+        data.push_back(unlock_time.into_val(&env));
+
+        env.events().publish(
+            (symbol_short!("ts_init"), split_id),
+            NebulaEvent {
+                version: 2,
+                timestamp: now,
+                action: symbol_short!("ts_init"),
+                data,
+            },
+        );
+
+        Ok(split_id)
+    }
+
+    /// Execute a pending treasury split after the 48-hour timelock has elapsed.
+    ///
+    /// Reverts with `TreasurySplitTimelocked` if called too early, or
+    /// `TreasurySplitAlreadyExecuted` if already executed.
+    pub fn execute_treasury_split(env: Env, caller: Address, split_id: u64) -> Result<(), Error> {
+        caller.require_auth();
+        storage::try_get_admin(&env)?.require_auth();
+
+        let mut split = storage::get_pending_treasury_split(&env, split_id)
+            .ok_or(Error::PendingTreasurySplitNotFound)?;
+
+        if split.executed {
+            return Err(Error::TreasurySplitAlreadyExecuted);
+        }
+
+        if env.ledger().timestamp() < split.unlock_time {
+            return Err(Error::TreasurySplitTimelocked);
+        }
+
+        let treasury = storage::get_treasury(&env).ok_or(Error::NoTreasury)?;
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &split.token);
+
+        for i in 0..split.recipients.len() {
+            let recipient = split.recipients.get(i).unwrap();
+            let amount = split.amounts.get(i).unwrap();
+            token_client.transfer(&treasury, &recipient, &amount);
+        }
+
+        split.executed = true;
+        storage::set_pending_treasury_split(&env, split_id, &split);
+
+        let now = env.ledger().timestamp();
+        let mut data = Vec::new(&env);
+        data.push_back(split_id.into_val(&env));
+        data.push_back(caller.into_val(&env));
+        data.push_back(now.into_val(&env));
+
+        env.events().publish(
+            (symbol_short!("ts_exec"), split_id),
+            NebulaEvent {
+                version: 2,
+                timestamp: now,
+                action: symbol_short!("ts_exec"),
+                data,
+            },
+        );
+
+        Ok(())
     }
 }
 

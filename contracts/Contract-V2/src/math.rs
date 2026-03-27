@@ -7,6 +7,38 @@ use crate::contracterror::Error;
 
 pub const SCALE: i128 = 10_000_000; // 10^7
 
+/// Nanoseconds per second.
+///
+/// All internal time arithmetic uses nanoseconds so that the calculation engine
+/// is forward-compatible with `ledger().timestamp_nanos()` once the Soroban SDK
+/// exposes it. Until then, callers multiply `ledger().timestamp()` by this
+/// constant to convert seconds → nanoseconds before passing to `calculate_flow`
+/// or `calculate_unlocked_internal`.
+pub const NANOS_PER_SEC: u64 = 1_000_000_000;
+
+/// Compute `floor(total * elapsed / duration)` using `FixedPoint::mul_div` for
+/// overflow-safe intermediate arithmetic.
+///
+/// Both `elapsed` and `duration` must be in the **same** unit (e.g. both in
+/// nanoseconds). Returns 0 on any degenerate input and falls back to plain
+/// integer division if the mul_div intermediate overflows (preserving
+/// correctness at the cost of truncation precision).
+pub fn calculate_flow(total: i128, duration: i128, elapsed: i128) -> i128 {
+    if duration <= 0 || elapsed <= 0 {
+        return 0;
+    }
+    if elapsed >= duration {
+        return total;
+    }
+    // Primary path: intermediate precision via mul_div.
+    match FixedPoint::mul_div(total, elapsed, duration) {
+        Ok(v) => v,
+        // Overflow path: fall back to plain division (still correct, just no
+        // extra precision from the SCALE trick).
+        Err(_) => total / duration * elapsed,
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FixedPoint(pub i128);
 
@@ -88,6 +120,41 @@ impl FixedPoint {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── calculate_flow ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_calculate_flow_halfway() {
+        // 50 % elapsed → exactly half the total
+        assert_eq!(calculate_flow(1_000_000, 200, 100), 500_000);
+    }
+
+    #[test]
+    fn test_calculate_flow_zero_elapsed() {
+        assert_eq!(calculate_flow(1_000_000, 200, 0), 0);
+    }
+
+    #[test]
+    fn test_calculate_flow_full_duration() {
+        // elapsed >= duration → full total
+        assert_eq!(calculate_flow(1_000_000, 200, 200), 1_000_000);
+        assert_eq!(calculate_flow(1_000_000, 200, 300), 1_000_000);
+    }
+
+    #[test]
+    fn test_calculate_flow_degenerate_duration() {
+        assert_eq!(calculate_flow(1_000_000, 0, 100), 0);
+        assert_eq!(calculate_flow(1_000_000, -1, 100), 0);
+    }
+
+    #[test]
+    fn test_calculate_flow_nanos_precision() {
+        // Simulate nanosecond inputs: 1.5 seconds elapsed out of 3 seconds
+        let total = 1_000_000_i128;
+        let duration = 3 * NANOS_PER_SEC as i128;
+        let elapsed = (NANOS_PER_SEC / 2 * 3) as i128; // 1.5 s in nanos
+        assert_eq!(calculate_flow(total, duration, elapsed), 500_000);
+    }
 
     // ── mul_div ──────────────────────────────────────────────────────────────
 

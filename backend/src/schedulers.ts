@@ -2,11 +2,13 @@ import cron from "node-cron";
 import { PriceService } from "./services/price.service.js";
 import { TvlAggregatorService } from "./services/tvl-aggregator.service.js";
 import { AssetMetadataService } from "./services/asset-metadata.service.js";
+import { AutopilotService } from "./services/autopilot.service.js";
 import { logger } from "./logger.js";
 
 const priceService = new PriceService();
 const tvlService = new TvlAggregatorService();
 const assetService = new AssetMetadataService();
+const autopilotService = new AutopilotService();
 
 /**
  * Update prices every 5 minutes (300 seconds)
@@ -84,4 +86,22 @@ export function initializeSchedulers() {
   scheduleGlobalStatsUpdate();
   scheduleDailyTvlSnapshot();
   scheduleAssetDiscovery();
+  scheduleAutopilot();
+}
+
+/**
+ * Autopilot: scan for due periodic split schedules every hour.
+ */
+export function scheduleAutopilot() {
+  cron.schedule("0 * * * *", async () => {
+    try {
+      logger.info("[Autopilot] Starting hourly schedule scan");
+      await autopilotService.runDueSchedules();
+      logger.info("[Autopilot] Hourly schedule scan completed");
+    } catch (error) {
+      logger.error("[Autopilot] Hourly scan failed", error);
+    }
+  });
+
+  logger.info("Autopilot scheduler started (every hour)");
 }

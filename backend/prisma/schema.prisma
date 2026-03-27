@@ -336,6 +336,26 @@ model Asset {
   updatedAt       DateTime @updatedAt
 
   @@index([tokenAddress])
+// Autopilot periodic split schedules
+model AutopilotSchedule {
+  id              String    @id @default(cuid())
+  name            String
+  frequency       String    // cron expression, e.g. "0 9 * * 1" (every Monday 9am)
+  splitConfigId   String    @map("split_config_id")
+  operatorAddress String    @map("operator_address")
+  minGasTankXlm  Float     @default(1.0) @map("min_gas_tank_xlm")
+  isActive        Boolean   @default(true) @map("is_active")
+  lastRun         DateTime? @map("last_run")
+  lastTxHash      String?   @map("last_tx_hash")
+  lastError       String?   @map("last_error")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@index([lastRun])
+  @@map("AutopilotSchedule")
+}
+
 // Whitelisted assets visible in the StellarStream UI
 model AssetConfig {
   id           String   @id @default(cuid())

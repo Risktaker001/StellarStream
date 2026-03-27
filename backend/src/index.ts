@@ -31,6 +31,7 @@ import { YieldAccrualWorker } from "./yield-accrual.worker.js";
 import { startWebhookWorker } from "./webhook-dispatcher.worker.js";
 import { bigintSerializer } from "./middleware/bigintSerializer.js";
 import { swaggerSpec } from "./swagger.js";
+import { swaggerV3Spec } from "./api/v3/swagger.js";
 import { initializeSchedulers } from "./schedulers.js";
 
 Sentry.init({
@@ -105,6 +106,12 @@ app.get("/api/v1/docs.json", (_req: Request, res: Response) => {
   res.json(swaggerSpec);
 });
 
+// ── V3 Swagger UI ─────────────────────────────────────────────────────────────
+app.use("/api/v3/docs", swaggerUi.serve, swaggerUi.setup(swaggerV3Spec));
+app.get("/api/v3/docs.json", (_req: Request, res: Response) => {
+  res.json(swaggerV3Spec);
+});
+
 // ── Auth routes ───────────────────────────────────────────────────────────────
 const authRouter = express.Router();
 authRouter.get("/nonce", rateLimitMiddleware, getNonce);
@@ -138,6 +145,12 @@ app.use("/api/v1", apiRouter);
 // ── V2 API router ─────────────────────────────────────────────────────────────
 import apiV2Router from "./api/v2/index.js";
 app.use("/api/v2", apiV2Router);
+
+// ── V3 API router ─────────────────────────────────────────────────────────────
+import apiV3Router from "./api/v3/index.js";
+// Support raw text bodies for CSV uploads on v3 routes
+app.use("/api/v3", express.text({ type: ["text/csv", "text/plain"], limit: "10mb" }));
+app.use("/api/v3", apiV3Router);
 
 // ── Batch metadata + stream graph ─────────────────────────────────────────────
 app.use("/api/v1", batchRoutes);
