@@ -4167,6 +4167,32 @@ impl Contract {
         storage::get_fee_collector(&env)
     }
 
+    /// Sweep rounding dust accumulated in the contract into the fee collector (treasury).
+    ///
+    /// Transfers the entire on-contract balance of `asset` that exceeds the sum of
+    /// all pending protocol fees for that asset — i.e. the "dust" left behind by
+    /// fixed-point rounding — to the configured `fee_collector` address.
+    ///
+    /// Auth: only the `fee_collector` itself may call this function.
+    pub fn reclaim_dust(env: Env, asset: Address) -> Result<i128, Error> {
+        let fee_collector = storage::get_fee_collector(&env).ok_or(Error::NoFeeCollector)?;
+        fee_collector.require_auth();
+
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &asset);
+        let contract_balance = token_client.balance(&env.current_contract_address());
+
+        let pending_fees = storage::get_pending_fees(&env, &fee_collector, &asset);
+        let dust = contract_balance - pending_fees;
+
+        if dust <= 0 {
+            return Err(Error::NothingToWithdraw);
+        }
+
+        token_client.transfer(&env.current_contract_address(), &fee_collector, &dust);
+
+        Ok(dust)
+    }
+
     /// Set the token used to pay disbursement fees. Admin-only.
     pub fn set_fee_token(env: Env, token: Address) -> Result<(), Error> {
         storage::try_get_admin(&env)?.require_auth();

@@ -38,6 +38,8 @@ pub enum Error {
     AssetNotWhitelisted = 29,
     /// Asset contract does not implement required token interface (balance/transfer)
     AssetInterfaceNotSupported = 67,
+    /// No fee collector address configured; admin must call set_fee_collector first
+    NoFeeCollector = 68,
     /// penalty_bps exceeds 10000 (100%)
     InvalidPenalty = 30,
     /// migrate_stream is blocked; standard V2 streams remain active.
