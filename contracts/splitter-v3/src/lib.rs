@@ -727,19 +727,44 @@ impl SplitterV3 {
             recipients.len() as u32,
         );
 
-        for r in recipients.iter() {
+        // Distribute to all recipients except the first, tracking total disbursed.
+        let mut total_disbursed: i128 = 0;
+        let first = recipients.get(0).unwrap();
+
+        for i in 1..recipients.len() {
+            let r = recipients.get(i).unwrap();
             let amount = total_amount
                 .checked_mul(r.bps as i128)
                 .ok_or(Error::Overflow)?
                 / 10_000;
             if amount > 0 {
                 token_client.transfer(&contract_addr, &r.address, &amount);
-                // Emit PaymentSent event per recipient for backend indexing.
                 env.events().publish(
                     (symbol_short!("paysent"), r.address.clone()),
                     amount,
                 );
             }
+            total_disbursed = total_disbursed.checked_add(amount).ok_or(Error::Overflow)?;
+        }
+
+        // First recipient absorbs any rounding dust so contract balance is exactly zero.
+        let first_base = total_amount
+            .checked_mul(first.bps as i128)
+            .ok_or(Error::Overflow)?
+            / 10_000;
+        let dust = total_amount
+            .checked_sub(total_disbursed)
+            .ok_or(Error::Overflow)?
+            .checked_sub(first_base)
+            .ok_or(Error::Overflow)?;
+        let first_amount = first_base.checked_add(dust).ok_or(Error::Overflow)?;
+
+        if first_amount > 0 {
+            token_client.transfer(&contract_addr, &first.address, &first_amount);
+            env.events().publish(
+                (symbol_short!("paysent"), first.address.clone()),
+                first_amount,
+            );
         }
 
         Ok(())
