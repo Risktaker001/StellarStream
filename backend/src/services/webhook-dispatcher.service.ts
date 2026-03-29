@@ -1,16 +1,19 @@
 import { PrismaClient } from "../generated/client/index.js";
-import { createHmac } from "crypto";
+import { createHmac, randomBytes } from "crypto";
 import { logger } from "../logger.js";
 
 const prisma = new PrismaClient();
 
 export interface WebhookPayload {
   eventType: string;
-  streamId: string | null;
+  streamId?: string | null;
+  splitId?: string | null;
   txHash: string;
-  sender: string;
-  receiver: string;
-  amount: string;
+  sender?: string;
+  receiver?: string;
+  amount?: string;
+  totalAmount?: string;
+  asset?: string;
   timestamp: string;
   [key: string]: unknown;
 }
@@ -125,6 +128,7 @@ export class WebhookDispatcherService {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-Nebula-Signature": signature,
           "X-Webhook-Signature": signature,
           "X-Webhook-ID": webhook.id,
           "User-Agent": "StellarStream-Webhook/1.0",
@@ -190,7 +194,7 @@ export class WebhookDispatcherService {
    * Generate a secure random secret key
    */
   private generateSecretKey(): string {
-    return require("crypto").randomBytes(32).toString("hex");
+    return randomBytes(32).toString("hex");
   }
 
   /**
