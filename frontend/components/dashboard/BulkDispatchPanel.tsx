@@ -4,7 +4,7 @@
 // Issue #695 — Bulk-Retry for Failed Batch Transactions
 // Issue #778 — Batch-Transfer Progress Overlay integration
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { BatchState } from "@/lib/bulk-splitter/use-bulk-splitter";
 import type { Recipient } from "@/lib/bulk-splitter/types";
 import {
@@ -12,19 +12,11 @@ import {
   saveBatchProgress,
   clearBatchProgress,
 } from "@/components/batch-progress-overlay";
-// Issue #689 — Multi-Asset Value-Aggregator in USD
-
-import { useMemo } from "react";
-import type { BatchState } from "@/lib/bulk-splitter/use-bulk-splitter";
-import type { Recipient } from "@/lib/bulk-splitter/types";
 import {
   usePriceFetcher,
   calculateTotalUsdValue,
   formatUsdValue,
 } from "@/lib/hooks";
-import { useState } from "react";
-import type { BatchState } from "@/lib/bulk-splitter/use-bulk-splitter";
-import type { Recipient } from "@/lib/bulk-splitter/types";
 import { getExplorerLink } from "@/lib/explorer";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

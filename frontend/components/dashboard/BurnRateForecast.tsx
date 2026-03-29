@@ -14,7 +14,6 @@ import {
   Tooltip,
   ReferenceLine,
   ResponsiveContainer,
-  type TooltipProps,
 } from "recharts";
 import { useBurnRateForecast, type ForecastWindow } from "@/lib/hooks/use-burn-rate-forecast";
 
@@ -28,7 +27,15 @@ function fmtUSD(n: number): string {
 
 // ─── Custom Tooltip ───────────────────────────────────────────────────────────
 
-function BurnTooltip({ active, payload, label }: TooltipProps<number, string>) {
+function BurnTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ dataKey?: string; value?: number | string }>;
+  label?: string | number;
+}) {
   if (!active || !payload?.length) return null;
   const cumulative = payload.find((p) => p.dataKey === "cumulative")?.value ?? 0;
   const daily = payload.find((p) => p.dataKey === "daily")?.value ?? 0;

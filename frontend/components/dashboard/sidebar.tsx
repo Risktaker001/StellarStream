@@ -23,6 +23,7 @@ import {
   Rocket,
   Coins,
   FileText,
+  Share2,
 } from "lucide-react";
 import { TransactionQueueManager } from "@/components/dashboard/TransactionQueueManager";
 

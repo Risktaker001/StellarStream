@@ -15,7 +15,7 @@ import { ConfirmOnDeviceModal } from "@/components/confirm-on-device-modal";
 import { LoadProposalDataButton } from "@/components/load-proposal-data-button";
 import { HighContrastGrid } from "@/components/high-contrast-grid";
 import { useWallet } from "@/lib/wallet-context";
-import { Server } from "@stellar/stellar-sdk";
+import { Horizon } from "@stellar/stellar-sdk";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FormData {
@@ -93,7 +93,7 @@ const RATE_SECONDS: Record<FormData["rateType"], number> = {
   "per-day": 86400,
 };
 
-const HORIZON_SERVER = new Server("https://horizon.stellar.org");
+const HORIZON_SERVER = new Horizon.Server("https://horizon.stellar.org");
 
 type RecipientValidationStatus =
   | "ok"
@@ -1333,9 +1333,11 @@ export default function CreateStreamPage() {
       return;
     }
 
+    const address = wallet.address;
+
     const validateBalance = async () => {
       try {
-        const account = await HORIZON_SERVER.loadAccount(wallet.address);
+        const account = await HORIZON_SERVER.loadAccount(address);
         const nativeBalance = getBalanceForAsset(account, "XLM");
         const assetBalance = getBalanceForAsset(account, form.asset);
         const feeXlm = feeStroops === 0 ? 0 : feeStroopsToXlm(feeStroops);
@@ -1568,7 +1570,7 @@ export default function CreateStreamPage() {
                     </div>
                   )}
 
-                  {step === 1 && <Step1 form={form} update={update} />}
+                  {step === 1 && <Step1 form={form} update={update} recipientValidation={recipientValidation} />}
                   {step === 2 && <Step2 form={form} update={update} />}
                   {step === 3 && <Step3
                     form={form}

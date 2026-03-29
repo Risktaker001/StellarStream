@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import {Joyride} from 'react-joyride';
-import type { CallBackProps, STATUS, Step } from 'react-joyride';
+import { Joyride, STATUS, type EventData, type Step } from 'react-joyride';
 
 const steps: Step[] = [
   {
@@ -38,10 +37,10 @@ export default function OnboardingTour() {
     }
   }, []);
 
-  const handleJoyrideCallback = (data: CallBackProps) => {
+  const handleJoyrideCallback = (data: EventData) => {
     const { status } = data;
 
-    if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
+    if (data.type === 'tour:end') {
       setRun(false);
       localStorage.setItem('stellar-wave3-onboarding-seen', 'true');
     }
@@ -53,27 +52,28 @@ export default function OnboardingTour() {
     <Joyride
       steps={steps}
       run={run}
-      callback={handleJoyrideCallback}
+      onEvent={handleJoyrideCallback}
       continuous
-      showProgress
-      showSkipButton
-      hideCloseButton
-      disableBeacon
       styles={{
-        options: {
-          primaryColor: '#3b82f6',
-          textColor: '#1f2937',
-          backgroundColor: '#ffffff',
-          arrowColor: '#ffffff',
-          zIndex: 10000,
-        },
         tooltip: {
           borderRadius: '16px',
           padding: '20px',
+          backgroundColor: '#ffffff',
+          color: '#1f2937',
         },
-        buttonNext: {
+        arrow: {
+          color: '#ffffff',
+        },
+        buttonPrimary: {
           backgroundColor: '#3b82f6',
           borderRadius: '9999px',
+          color: '#ffffff',
+        },
+        buttonSkip: {
+          color: '#1f2937',
+        },
+        overlay: {
+          zIndex: 10000,
         },
       }}
       locale={{

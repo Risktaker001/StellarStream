@@ -130,7 +130,7 @@ export function absoluteToBps(absolute: bigint | string, totalAmount: bigint | s
         );
     }
 
-    const bps = abs.dividedBy(total).multipliedBy(BPS_TOTAL).integerValue(BigNumber.ROUND_ROUND);
+    const bps = abs.dividedBy(total).multipliedBy(BPS_TOTAL).integerValue(BigNumber.ROUND_HALF_UP);
     if (bps.isGreaterThan(BPS_TOTAL)) {
         throw new RangeError(
             `absoluteToBps: computed ${bps.toFixed(0)} BPS exceeds 10 000 (100 %). ` +
