@@ -401,6 +401,37 @@ exports.Prisma.AssetConfigScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
+exports.Prisma.DisbursementScalarFieldEnum = {
+  id: 'id',
+  senderAddress: 'senderAddress',
+  totalAmount: 'totalAmount',
+  asset: 'asset',
+  txHash: 'txHash',
+  createdAt: 'createdAt'
+};
+
+exports.Prisma.SplitRecipientScalarFieldEnum = {
+  id: 'id',
+  disbursementId: 'disbursementId',
+  recipientAddress: 'recipientAddress',
+  amount: 'amount',
+  status: 'status'
+};
+
+exports.Prisma.AssetMappingScalarFieldEnum = {
+  id: 'id',
+  stellarAssetId: 'stellarAssetId',
+  symbol: 'symbol',
+  sourceChain: 'sourceChain',
+  sourceContract: 'sourceContract',
+  label: 'label',
+  bridgeProtocol: 'bridgeProtocol',
+  decimals: 'decimals',
+  isNative: 'isNative',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
 exports.Prisma.SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -444,6 +475,12 @@ exports.NotificationPlatform = exports.$Enums.NotificationPlatform = {
   telegram: 'telegram'
 };
 
+exports.PayoutStatus = exports.$Enums.PayoutStatus = {
+  PENDING: 'PENDING',
+  SENT: 'SENT',
+  FAILED: 'FAILED'
+};
+
 exports.Prisma.ModelName = {
   Stream: 'Stream',
   ContractEvent: 'ContractEvent',
@@ -466,7 +503,10 @@ exports.Prisma.ModelName = {
   TvlSnapshot: 'TvlSnapshot',
   Asset: 'Asset',
   AutopilotSchedule: 'AutopilotSchedule',
-  AssetConfig: 'AssetConfig'
+  AssetConfig: 'AssetConfig',
+  Disbursement: 'Disbursement',
+  SplitRecipient: 'SplitRecipient',
+  AssetMapping: 'AssetMapping'
 };
 
 /**

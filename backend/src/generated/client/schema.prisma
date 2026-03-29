@@ -381,20 +381,11 @@ model AutopilotSchedule {
   lastRun         DateTime? @map("last_run")
   lastTxHash      String?   @map("last_tx_hash")
   lastError       String?   @map("last_error")
-  /// ISO-8601 timestamp of the scheduled release / execution time.
-  /// Used by the multi-sig notifier to detect the 24-hour window.
-  releaseTime     DateTime? @map("release_time")
-  /// JSON array of Stellar G-addresses that must co-sign before execution.
-  /// e.g. ["GABC...", "GDEF..."]
-  signers         String[]  @default([]) @map("signers")
-  /// Tracks whether the 24-hour pre-release notification has been sent.
-  notifiedAt      DateTime? @map("notified_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@index([isActive])
   @@index([lastRun])
-  @@index([releaseTime])
   @@map("AutopilotSchedule")
 }
 
@@ -414,4 +405,59 @@ model AssetConfig {
 
   @@index([isVerified])
   @@index([isVisible])
+}
+
+// ── V3 Fund-Split Tables ──────────────────────────────────────────────────────
+
+// Header record for a single fund-split disbursement
+model Disbursement {
+  id            String   @id @default(cuid())
+  senderAddress String   @map("sender_address")
+  totalAmount   String   @map("total_amount")
+  asset         String
+  txHash        String   @unique @map("tx_hash")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  recipients SplitRecipient[]
+
+  @@index([senderAddress])
+  @@index([txHash])
+}
+
+// Individual payout row linked to a parent Disbursement
+model SplitRecipient {
+  id               String       @id @default(cuid())
+  disbursementId   String       @map("disbursement_id")
+  recipientAddress String       @map("recipient_address")
+  amount           String
+  status           PayoutStatus @default(PENDING)
+
+  disbursement Disbursement @relation(fields: [disbursementId], references: [id])
+
+  @@index([disbursementId])
+  @@index([recipientAddress])
+}
+
+enum PayoutStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+// Unified registry mapping Stellar Asset IDs to their source-chain equivalents
+model AssetMapping {
+  id             String   @id @default(cuid())
+  stellarAssetId String   @unique // "SYMBOL:ISSUER" or contract address
+  symbol         String
+  sourceChain    String // "stellar" | "ethereum" | "polygon" | etc.
+  sourceContract String? // Origin-chain contract address (null for native Stellar)
+  label          String // Human-readable e.g. "USDC (Circle/Stellar)"
+  bridgeProtocol String? // "wormhole" | "squid" | null for native
+  decimals       Int      @default(7)
+  isNative       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([symbol])
+  @@index([sourceChain])
 }
