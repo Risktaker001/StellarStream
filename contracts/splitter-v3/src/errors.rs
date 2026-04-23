@@ -28,4 +28,10 @@ pub enum Error {
     EmptyRecipients = 23,
     NotYetReleased = 22,
     InvalidBpsSum = 24,
+    // #924: upgrade / migration
+    MigrationAlreadyApplied = 25,
+    // #926: atomic transfer failure
+    TransferFailed = 26,
+    // #927: whitelist
+    RecipientNotWhitelisted = 27,
 }

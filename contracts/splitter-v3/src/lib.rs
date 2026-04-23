@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env, Vec,
+    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Vec,
 };
 
 mod errors;
@@ -113,7 +113,76 @@ impl SplitterV3 {
             Self::_set_verified(&env, &addr, true);
         }
 
+        Self::_bump_instance_ttl(&env);
         Ok(())
+    }
+
+    // ── #924: WASM upgrade with migration version guard ───────────────────────
+
+    /// Upgrade the contract WASM. Gated by the admin quorum.
+    /// Stores a `MigrationVersion` so the same migration cannot run twice.
+    pub fn upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        migration_version: u32,
+    ) -> Result<(), Error> {
+        Self::_require_admin(&env)?;
+
+        let current_version: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MigrationVersion)
+            .unwrap_or(0);
+
+        if migration_version <= current_version {
+            return Err(Error::MigrationAlreadyApplied);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MigrationVersion, &migration_version);
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
+
+    // ── #927: Whitelist management ────────────────────────────────────────────
+
+    /// Add `address` to the recipient whitelist. Admin only.
+    pub fn add_to_whitelist(env: Env, address: Address) -> Result<(), Error> {
+        Self::_require_admin(&env)?;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Whitelisted(address.clone()), &true);
+        Self::_bump_persistent_ttl(&env, &DataKey::Whitelisted(address));
+        Ok(())
+    }
+
+    /// Remove `address` from the recipient whitelist. Admin only.
+    pub fn remove_from_whitelist(env: Env, address: Address) -> Result<(), Error> {
+        Self::_require_admin(&env)?;
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Whitelisted(address));
+        Ok(())
+    }
+
+    /// Enable or disable whitelist-only mode for `split_funds`. Admin only.
+    pub fn set_whitelist_only(env: Env, enabled: bool) -> Result<(), Error> {
+        Self::_require_admin(&env)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::WhitelistOnly, &enabled);
+        Self::_bump_instance_ttl(&env);
+        Ok(())
+    }
+
+    /// View whether an address is whitelisted.
+    pub fn is_whitelisted(env: Env, address: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Whitelisted(address))
+            .unwrap_or(false)
     }
 
     // ── #633: Verification management (single-admin) ──────────────────────────
@@ -159,6 +228,8 @@ impl SplitterV3 {
         let proposal = Proposal { action, approvals, executed: false };
         env.storage().persistent().set(&DataKey::Proposal(id), &proposal);
         env.storage().instance().set(&DataKey::NextProposalId, &(id + 1));
+        Self::_bump_persistent_ttl(&env, &DataKey::Proposal(id));
+        Self::_bump_instance_ttl(&env);
 
         Ok(id)
     }
@@ -395,6 +466,7 @@ impl SplitterV3 {
         env.storage()
             .persistent()
             .set(&DataKey::ScheduledSplit(split_id), &config);
+        Self::_bump_persistent_ttl(&env, &DataKey::ScheduledSplit(split_id));
 
         env.events()
             .publish((symbol_short!("sched"), split_id), release_time);
@@ -651,6 +723,8 @@ impl SplitterV3 {
 
     /// Authenticated batch transfer: sender authorizes the entire batch,
     /// asset is validated as a live token contract, and recipients must be non-empty.
+    /// #926: uses try_transfer — if any transfer fails the whole tx panics (atomic rollback).
+    /// #927: if whitelist-only mode is on, every recipient must be whitelisted.
     pub fn split_funds(
         env: Env,
         sender: Address,
@@ -666,21 +740,42 @@ impl SplitterV3 {
             return Err(Error::EmptyRecipients);
         }
 
+        // #927: whitelist-only guard.
+        let whitelist_only: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::WhitelistOnly)
+            .unwrap_or(false);
+        if whitelist_only {
+            for r in recipients.iter() {
+                let is_wl: bool = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Whitelisted(r.address.clone()))
+                    .unwrap_or(false);
+                if !is_wl {
+                    return Err(Error::RecipientNotWhitelisted);
+                }
+            }
+        }
+
         // Security: validate asset is a live token contract by calling decimals().
-        // This traps early if the address is not a valid deployed contract.
         let token_client = token::Client::new(&env, &asset);
         let _ = token_client.decimals();
 
         let contract_addr = env.current_contract_address();
         token_client.transfer(&sender, &contract_addr, &total_amount);
 
+        // #926: use try_transfer — panic on any failure to trigger atomic rollback.
         for r in recipients.iter() {
             let amount = total_amount
                 .checked_mul(r.share_bps as i128)
                 .ok_or(Error::Overflow)?
                 / 10_000;
             if amount > 0 {
-                token_client.transfer(&contract_addr, &r.address, &amount);
+                token_client
+                    .try_transfer(&contract_addr, &r.address, &amount)
+                    .map_err(|_| Error::TransferFailed)?;
             }
         }
 
@@ -929,6 +1024,7 @@ impl SplitterV3 {
         let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         let updated = current.checked_add(amount).ok_or(Error::Overflow)?;
         env.storage().persistent().set(&key, &updated);
+        Self::_bump_persistent_ttl(env, &key);
         Ok(())
     }
 
@@ -950,5 +1046,18 @@ impl SplitterV3 {
         }
         env.events().publish((symbol_short!("split"),), distributable);
         Ok(())
+    }
+
+    // ── #925: TTL helpers ─────────────────────────────────────────────────────
+
+    /// Bump instance storage TTL (~1 year in ledgers at ~5s/ledger).
+    fn _bump_instance_ttl(env: &Env) {
+        // 6_312_000 ledgers ≈ 1 year; threshold at half that.
+        env.storage().instance().extend_ttl(3_110_400, 6_220_800);
+    }
+
+    /// Bump a single persistent storage entry TTL.
+    fn _bump_persistent_ttl(env: &Env, key: &DataKey) {
+        env.storage().persistent().extend_ttl(key, 3_110_400, 6_220_800);
     }
 }

@@ -16,4 +16,9 @@ pub enum DataKey {
     ScheduledSplit(u64),
     ClaimableBalance(Address, Address),
     CouncilKeys,
+    // #924: migration version to prevent re-running migration logic
+    MigrationVersion,
+    // #927: whitelist map and flag
+    Whitelisted(Address),
+    WhitelistOnly,
 }
