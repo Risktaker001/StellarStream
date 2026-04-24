@@ -18,13 +18,13 @@ const REGIONS: Array<{ name: string; x: number; y: number }> = [
   { name: "South America", x: 220, y: 230 },
   { name: "Western Europe", x: 390, y: 110 },
   { name: "Eastern Europe", x: 450, y: 100 },
-  { name: "West Africa",    x: 370, y: 190 },
-  { name: "East Africa",    x: 450, y: 200 },
-  { name: "Middle East",    x: 490, y: 140 },
-  { name: "South Asia",     x: 560, y: 160 },
-  { name: "East Asia",      x: 640, y: 130 },
+  { name: "West Africa", x: 370, y: 190 },
+  { name: "East Africa", x: 450, y: 200 },
+  { name: "Middle East", x: 490, y: 140 },
+  { name: "South Asia", x: 560, y: 160 },
+  { name: "East Asia", x: 640, y: 130 },
   { name: "Southeast Asia", x: 630, y: 185 },
-  { name: "Oceania",        x: 680, y: 240 },
+  { name: "Oceania", x: 680, y: 240 },
 ];
 
 function addressToRegion(address: string): { name: string; x: number; y: number } {
@@ -33,12 +33,26 @@ function addressToRegion(address: string): { name: string; x: number; y: number 
   return REGIONS[seed % REGIONS.length];
 }
 
+function parseAsset(amount?: string): string | undefined {
+  if (!amount) return undefined;
+  const match = amount.trim().match(/([A-Z]{2,6})$/);
+  return match ? match[1] : undefined;
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  delivered: "Delivered",
+  in_transit: "In Transit",
+  pending: "Pending",
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface FlowRecipient {
   address: string;
   amount?: string;
   label?: string;
+  asset?: string;
+  deliveryStatus?: "delivered" | "in_transit" | "pending" | string;
 }
 
 interface Props {
@@ -71,28 +85,30 @@ const CONTINENT_PATHS = [
 // ─── Beam component ───────────────────────────────────────────────────────────
 
 function CapitalBeam({
-  x1, y1, x2, y2, delay, amount,
+  x1, y1, x2, y2, delay, amount, fade = false,
 }: {
   x1: number; y1: number; x2: number; y2: number;
-  delay: number; amount?: string;
+  delay: number; amount?: string; fade?: boolean;
 }) {
   // Cubic bezier control point — arc upward
   const cx = (x1 + x2) / 2;
   const cy = Math.min(y1, y2) - 60;
   const d = `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
+  const strokeOpacity = fade ? 0.15 : 1;
+  const dotOpacity = fade ? 0.35 : 1;
 
   return (
-    <g>
+    <g opacity={fade ? 0.35 : 1}>
       {/* Static dim path */}
-      <path d={d} fill="none" stroke="rgba(34,211,238,0.12)" strokeWidth="1" />
+      <path d={d} fill="none" stroke="rgba(34,211,238,0.12)" strokeWidth="1" opacity={strokeOpacity} />
 
       {/* Animated travelling dot */}
       <motion.circle
         r={3}
         fill="#22d3ee"
         filter="url(#beam-glow)"
-        initial={{ offsetDistance: "0%" }}
-        animate={{ offsetDistance: "100%" }}
+        initial={{ offsetDistance: "0%", opacity: dotOpacity }}
+        animate={{ offsetDistance: "100%", opacity: dotOpacity }}
         transition={{
           duration: 1.6,
           delay,
@@ -149,10 +165,59 @@ export function CapitalFlowMap({
     () =>
       recipients.map((r) => ({
         ...r,
+        asset: r.asset ?? parseAsset(r.amount),
         region: addressToRegion(r.address),
       })),
     [recipients],
   );
+
+  const statusOptions = useMemo(() => {
+    return Array.from(
+      new Set(recipientNodes
+        .map((r) => r.deliveryStatus)
+        .filter(Boolean) as string[]),
+    ).sort();
+  }, [recipientNodes]);
+
+  const [showUSDCOnly, setShowUSDCOnly] = useState(false);
+  const [activeStatuses, setActiveStatuses] = useState<string[]>(statusOptions);
+  const [replayCount, setReplayCount] = useState(0);
+
+  useEffect(() => {
+    if (statusOptions.length > 0) {
+      setActiveStatuses(statusOptions);
+    }
+  }, [statusOptions.join(",")]);
+
+  const filteredRecipients = useMemo(
+    () =>
+      recipientNodes.map((r) => {
+        const isNonUSDC = showUSDCOnly && r.asset !== "USDC";
+        const isStatusFiltered =
+          statusOptions.length > 0 &&
+          r.deliveryStatus &&
+          !activeStatuses.includes(r.deliveryStatus);
+
+        return {
+          ...r,
+          isFaded: isNonUSDC || isStatusFiltered,
+        };
+      }),
+    [recipientNodes, showUSDCOnly, activeStatuses, statusOptions.length],
+  );
+
+  const toggleStatus = (status: string) => {
+    setActiveStatuses((current) =>
+      current.includes(status)
+        ? current.filter((value) => value !== status)
+        : [...current, status],
+    );
+  };
+
+  const replayAnimation = () => setReplayCount((count) => count + 1);
+
+  const assetCount = recipientNodes.filter((r) => r.asset === "USDC").length;
+  const visibleCount = filteredRecipients.length;
 
   return (
     <div
@@ -218,24 +283,26 @@ export function CapitalFlowMap({
         ))}
 
         {/* Beams — only animate during Execute phase */}
-        <AnimatePresence>
-          {isExecuting &&
-            recipientNodes.map((r, i) => (
+        {isExecuting && (
+          <g key={`replay-${replayCount}`}>
+            {filteredRecipients.map((r, i) => (
               <CapitalBeam
-                key={r.address}
+                key={`${r.address}-${replayCount}`}
                 x1={SENDER.x}
                 y1={SENDER.y}
                 x2={r.region.x}
                 y2={r.region.y}
                 delay={i * 0.25}
                 amount={r.amount}
+                fade={Boolean(r.isFaded)}
               />
             ))}
-        </AnimatePresence>
+          </g>
+        )}
 
         {/* Static dim lines when not executing */}
         {!isExecuting &&
-          recipientNodes.map((r) => {
+          filteredRecipients.map((r) => {
             const cx = (SENDER.x + r.region.x) / 2;
             const cy = Math.min(SENDER.y, r.region.y) - 60;
             return (
@@ -246,6 +313,7 @@ export function CapitalFlowMap({
                 stroke="rgba(255,255,255,0.05)"
                 strokeWidth="0.8"
                 strokeDasharray="3 4"
+                opacity={r.isFaded ? 0.15 : 1}
               />
             );
           })}
@@ -270,21 +338,21 @@ export function CapitalFlowMap({
         </text>
 
         {/* Recipient nodes */}
-        {recipientNodes.map((r) => (
-          <g key={r.address}>
+        {filteredRecipients.map((r) => (
+          <g key={r.address} opacity={r.isFaded ? 0.35 : 1}>
             <circle
               cx={r.region.x}
               cy={r.region.y}
               r={4}
-              fill={isExecuting ? "#22d3ee" : "rgba(255,255,255,0.2)"}
-              filter={isExecuting ? "url(#node-glow)" : undefined}
+              fill={isExecuting ? (r.isFaded ? "rgba(34,211,238,0.25)" : "#22d3ee") : "rgba(255,255,255,0.2)"}
+              filter={isExecuting && !r.isFaded ? "url(#node-glow)" : undefined}
             />
             <text
               x={r.region.x}
               y={r.region.y + 12}
               textAnchor="middle"
               fontSize="6.5"
-              fill="rgba(255,255,255,0.35)"
+              fill={r.isFaded ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.35)"}
               fontFamily="monospace"
             >
               {r.label ?? `${r.address.slice(0, 5)}…`}
@@ -292,6 +360,60 @@ export function CapitalFlowMap({
           </g>
         ))}
       </svg>
+
+      <div className="absolute right-4 top-4 z-20 w-[220px] rounded-3xl border border-white/10 bg-[#06070f]/95 p-3 shadow-2xl backdrop-blur-xl">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.25em] text-white/40">Flow filter</p>
+            <p className="text-sm font-semibold text-white">Interactive legend</p>
+          </div>
+          <button
+            type="button"
+            onClick={replayAnimation}
+            className="rounded-2xl border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-semibold text-white/80 hover:bg-white/10 transition"
+          >
+            Replay
+          </button>
+        </div>
+
+        <div className="mt-3 space-y-2">
+          <button
+            type="button"
+            onClick={() => setShowUSDCOnly((current) => !current)}
+            className={`w-full rounded-2xl px-3 py-2 text-left text-sm font-medium transition ${showUSDCOnly ? "bg-cyan-500/15 text-cyan-200 border border-cyan-500/30" : "bg-white/5 text-white/70 border border-white/10 hover:bg-white/10"}`}
+          >
+            USDC Only
+          </button>
+
+          {statusOptions.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-[10px] uppercase tracking-[0.24em] text-white/40">Delivery status</p>
+              <div className="grid grid-cols-2 gap-2">
+                {statusOptions.map((status) => {
+                  const active = activeStatuses.includes(status);
+                  return (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => toggleStatus(status)}
+                      className={`rounded-2xl px-2.5 py-2 text-[11px] font-semibold transition ${active ? "bg-white/10 text-white" : "bg-white/5 text-white/50 hover:bg-white/10"}`}
+                    >
+                      {STATUS_LABELS[status] ?? status}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <p className="text-[11px] text-white/40">No delivery status metadata available.</p>
+          )}
+        </div>
+
+        <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] text-white/50">
+          Showing {visibleCount} of {recipientNodes.length} flows
+          {showUSDCOnly ? ` · USDC only (${assetCount})` : ""}
+        </div>
+      </div>
 
       {/* Legend */}
       <div className="flex items-center gap-4 px-4 py-2 border-t border-white/[0.06]">

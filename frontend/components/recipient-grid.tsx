@@ -79,7 +79,6 @@ interface Props {
 }
 
 export function RecipientGrid({ rows, onChange, invalidTrustlineAddresses }: Props) {
-export function RecipientGrid({ rows, onChange }: Props) {
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [bulkActionMode, setBulkActionMode] = useState<boolean>(false);
 
@@ -241,11 +240,10 @@ export function RecipientGrid({ rows, onChange }: Props) {
                   value={row.address}
                   onChange={(e) => update(row.id, { address: e.target.value })}
                   placeholder="G… or *stellar.org"
-                  className={`w-full rounded-lg border px-3 py-1.5 text-xs text-white/80 placeholder-white/20 focus:outline-none font-mono transition-colors ${
-                    invalidTrustlineAddresses?.has(row.address)
+                  className={`w-full rounded-lg border px-3 py-1.5 text-xs text-white/80 placeholder-white/20 focus:outline-none font-mono transition-colors ${invalidTrustlineAddresses?.has(row.address)
                       ? "border-amber-400/50 bg-amber-400/[0.05] focus:border-amber-400"
                       : "border-white/[0.08] bg-white/[0.04] focus:border-cyan-400/50"
-                  }`}
+                    }`}
                 />
                 {invalidTrustlineAddresses?.has(row.address) && (
                   <AlertTriangle
@@ -294,14 +292,13 @@ export function RecipientGrid({ rows, onChange }: Props) {
                   row.memoType === "id"
                     ? "e.g. 123456789"
                     : row.memoType === "text"
-                    ? "e.g. invoice-42"
-                    : "—"
+                      ? "e.g. invoice-42"
+                      : "—"
                 }
-                className={`rounded-lg border px-3 py-1.5 text-xs text-white/80 placeholder-white/20 focus:outline-none transition-colors ${
-                  row.memoError
+                className={`rounded-lg border px-3 py-1.5 text-xs text-white/80 placeholder-white/20 focus:outline-none transition-colors ${row.memoError
                     ? "border-red-400/50 bg-red-400/[0.05] focus:border-red-400"
                     : "border-white/[0.08] bg-white/[0.04] focus:border-cyan-400/50"
-                } disabled:opacity-30`}
+                  } disabled:opacity-30`}
               />
               {/* Remove */}
               <button
