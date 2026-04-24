@@ -20,6 +20,7 @@ import proofOfPaymentRouter from "./proof-of-payment.routes.js";
 import orgGasStatusRouter from "./org-gas-status.routes.js";
 import notificationChannelsRouter from "./notification-channels.routes.js";
 import assetMapperRouter from "./asset-mapper.routes.js";
+import templateRouter from "./template.routes.js";
 
 const router = Router();
 
@@ -52,5 +53,6 @@ router.use(proofOfPaymentRouter);
 router.use(orgGasStatusRouter);
 router.use(notificationChannelsRouter);
 router.use("/assets", assetMapperRouter);
+router.use(templateRouter);
 
 export default router;
