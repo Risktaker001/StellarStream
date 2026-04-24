@@ -16,6 +16,7 @@ import splitExpandRouter from "./split-expand.routes.js";
 import webhooksRouter from "./webhooks.routes.js";
 import feeBumpRouter from "./fee-bump.routes.js";
 import draftVersionsRouter from "./draft-versions.routes.js";
+import templateRouter from "./template.routes.js";
 
 const router = Router();
 
@@ -44,5 +45,6 @@ router.use(splitExpandRouter);
 router.use(webhooksRouter);
 router.use(feeBumpRouter);
 router.use(draftVersionsRouter);
+router.use(templateRouter);
 
 export default router;
