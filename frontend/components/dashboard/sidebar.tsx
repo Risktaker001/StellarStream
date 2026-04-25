@@ -32,6 +32,7 @@ import {
   ArrowRightLeft,
 } from "lucide-react";
 import { TransactionQueueManager } from "@/components/dashboard/TransactionQueueManager";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { NavSyncIndicator } from "@/components/SyncStatusIndicator";
 
 type NavItem = {
@@ -278,6 +279,10 @@ export function Sidebar({ onOpenAuditLog }: SidebarProps) {
                   })}
                 </nav>
 
+                <div className="mt-4">
+                  <ThemeToggle className="w-full justify-between" />
+                </div>
+
                 <div className="mt-5 rounded-2xl border border-white/10 bg-black/25 p-4">
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#00F5FF]/35 bg-[#00F5FF]/12 text-sm font-semibold text-[#CCFAFF]">
@@ -394,6 +399,13 @@ export function Sidebar({ onOpenAuditLog }: SidebarProps) {
             }
           })}
         </nav>
+
+        {/* Theme toggle — hidden when collapsed */}
+        {!collapsed && (
+          <div className="mt-4">
+            <ThemeToggle className="w-full justify-between" />
+          </div>
+        )}
 
         <div
           className={`mt-5 rounded-2xl border border-white/10 bg-black/25 transition-all duration-300 ease-in-out ${collapsed ? "h-10 w-10 flex items-center justify-center p-0" : "p-3"
