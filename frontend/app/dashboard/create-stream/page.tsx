@@ -5,6 +5,8 @@ import { ShieldAlert, ArrowLeftRight, Fingerprint, LockKeyhole, ShieldCheck } fr
 import { useProtocolStatus } from "@/lib/use-protocol-status";
 import { Can } from "@/components/Can";
 import PrivacyShieldToggle from "@/components/privacy-shield-toggle";
+import { useRecursiveSplitGuard } from "@/lib/use-recursive-split-guard";
+import { SelfReferenceTooltip } from "@/components/self-reference-tooltip";
 import { TransactionPrioritySelector } from "@/components/transaction-priority-selector";
 import { useTransactionPriority, type PriorityTier } from "@/lib/use-transaction-priority";
 import SwapAndStream from "@/components/swap-and-stream";
@@ -683,6 +685,10 @@ function StreamSplitter({
             {addressValid && (
               <p className="font-body text-xs text-cyan-400/60">Valid Stellar address ✓</p>
             )}
+            <SelfReferenceTooltip
+              show={addressValid && form.splitAddress.trim().toUpperCase() === (process.env.NEXT_PUBLIC_CONTRACT_ID ?? "").toUpperCase() || addressValid && form.splitAddress.trim().toUpperCase() === (process.env.NEXT_PUBLIC_NEBULA_CONTRACT_ID ?? "").toUpperCase()}
+              message="Self-Reference Error: This address matches the Splitter contract. Adding the contract as a recipient could lock funds or cause a recursive loop."
+            />
 
             {/* Add recipient to split list */}
             <div className="mt-4 flex items-center gap-2">
@@ -1152,6 +1158,11 @@ function Step3({
         </p>
       </div>
 
+      <button
+        onClick={onSign}
+        disabled={signing || isSelfReference || hasDuplicates}
+        className="w-full rounded-2xl bg-cyan-400 py-4 font-body text-base font-bold text-black transition-all duration-200 hover:bg-cyan-300 disabled:opacity-60 disabled:cursor-not-allowed"
+        style={{ boxShadow: signing ? "none" : "0 0 32px rgba(34,211,238,0.35)" }}
       <TransactionPrioritySelector
         selected={priorityTier}
         onChange={onPriorityChange}
