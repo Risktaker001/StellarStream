@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { ShieldAlert } from "lucide-react";
 import { useProtocolStatus } from "@/lib/use-protocol-status";
 import PrivacyShieldToggle from "@/components/privacy-shield-toggle";
+import { useRecursiveSplitGuard } from "@/lib/use-recursive-split-guard";
+import { SelfReferenceTooltip } from "@/components/self-reference-tooltip";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FormData {
@@ -470,6 +472,10 @@ function StreamSplitter({
             {addressValid && (
               <p className="font-body text-xs text-cyan-400/60">Valid Stellar address ✓</p>
             )}
+            <SelfReferenceTooltip
+              show={addressValid && form.splitAddress.trim().toUpperCase() === (process.env.NEXT_PUBLIC_CONTRACT_ID ?? "").toUpperCase() || addressValid && form.splitAddress.trim().toUpperCase() === (process.env.NEXT_PUBLIC_NEBULA_CONTRACT_ID ?? "").toUpperCase()}
+              message="Self-Reference Error: This address matches the Splitter contract. Adding the contract as a recipient could lock funds or cause a recursive loop."
+            />
           </div>
         </div>
       )}
@@ -734,7 +740,7 @@ function Step3({
 
       <button
         onClick={onSign}
-        disabled={signing}
+        disabled={signing || isSelfReference || hasDuplicates}
         className="w-full rounded-2xl bg-cyan-400 py-4 font-body text-base font-bold text-black transition-all duration-200 hover:bg-cyan-300 disabled:opacity-60 disabled:cursor-not-allowed"
         style={{ boxShadow: signing ? "none" : "0 0 32px rgba(34,211,238,0.35)" }}
       >
