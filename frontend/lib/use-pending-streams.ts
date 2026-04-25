@@ -99,27 +99,59 @@ const INITIAL_PENDING_STREAMS: PendingStream[] = [
 // ─── Soroban contract simulation ─────────────────────────────────────────────
 
 /**
- * Simulates calling the Soroban `approve_stream_request` contract function.
- * Replace this with the real Soroban SDK call when integrating with the chain.
+ * Signs a pending stream approval via the connected wallet (Freighter or Albedo).
  *
- * @example Real integration would look like:
- * ```ts
- * import { Contract, SorobanRpc } from "@stellar/stellar-sdk";
- * const server = new SorobanRpc.Server(RPC_URL);
- * const contract = new Contract(CONTRACT_ADDRESS);
- * const tx = await contract.call("approve_stream_request", streamId);
- * const result = await server.sendTransaction(tx);
- * ```
+ * Flow:
+ *  1. Build a Soroban transaction XDR for `approve_stream_request(streamId)`.
+ *  2. Request the wallet extension to sign it.
+ *  3. Submit the signed XDR to the Soroban RPC and return the tx hash.
+ *
+ * The XDR construction and submission are stubbed here; replace the marked
+ * sections with real Soroban SDK calls when integrating with the chain.
  */
 async function callApproveStreamRequest(streamId: string): Promise<{ txHash: string }> {
-    // Simulate network latency
-    await new Promise((resolve) => setTimeout(resolve, 1800 + Math.random() * 800));
+    // ── 1. Build unsigned XDR (stub) ──────────────────────────────────────────
+    // Real implementation:
+    //   const server = new SorobanRpc.Server(process.env.NEXT_PUBLIC_RPC_URL!);
+    //   const contract = new Contract(process.env.NEXT_PUBLIC_CONTRACT_ID!);
+    //   const account = await server.getAccount(signerAddress);
+    //   const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase })
+    //     .addOperation(contract.call("approve_stream_request", nativeToScVal(streamId, { type: "string" })))
+    //     .setTimeout(30)
+    //     .build();
+    //   const preparedTx = await server.prepareTransaction(tx);
+    //   const unsignedXdr = preparedTx.toXDR();
+    const unsignedXdr = `AAAAAQ...${streamId.slice(0, 8)}...stub_xdr`;
 
-    // Simulate 10% failure rate for realistic UX testing
-    if (Math.random() < 0.1) {
-        throw new Error("Transaction simulation failed: insufficient signers or network error");
+    // ── 2. Sign via wallet extension ──────────────────────────────────────────
+    let signedXdr: string;
+
+    if (typeof window !== "undefined" && (window as any).freighter) {
+        // Freighter
+        const { signTransaction } = await import("@stellar/freighter-api");
+        const network = process.env.NEXT_PUBLIC_STELLAR_NETWORK === "mainnet" ? "PUBLIC" : "TESTNET";
+        const result = await signTransaction(unsignedXdr, { network });
+        if ("error" in result && result.error) throw new Error(result.error);
+        signedXdr = (result as any).signedTxXdr ?? unsignedXdr;
+    } else if (typeof window !== "undefined" && (window as any).albedo) {
+        // Albedo fallback
+        const albedo = (window as any).albedo;
+        const result = await albedo.tx({ xdr: unsignedXdr, submit: false });
+        signedXdr = result.signed_envelope_xdr ?? unsignedXdr;
+    } else {
+        // Dev / test fallback — simulate latency
+        await new Promise((resolve) => setTimeout(resolve, 1800 + Math.random() * 800));
+        if (Math.random() < 0.1) {
+            throw new Error("Transaction simulation failed: insufficient signers or network error");
+        }
+        signedXdr = unsignedXdr;
     }
 
+    // ── 3. Submit signed XDR (stub) ───────────────────────────────────────────
+    // Real implementation:
+    //   const submitResult = await server.sendTransaction(TransactionBuilder.fromXDR(signedXdr, networkPassphrase));
+    //   if (submitResult.status === "ERROR") throw new Error(submitResult.errorResult?.result().toString());
+    //   return { txHash: submitResult.hash };
     const mockTxHash = `0x${Array.from({ length: 64 }, () =>
         Math.floor(Math.random() * 16).toString(16)
     ).join("")}`;

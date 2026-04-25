@@ -1,9 +1,10 @@
 "use client";
 
 // components/batch-progress-overlay.tsx
-// Issue #778 — Batch-Transfer Progress Overlay (survives page refresh via sessionStorage)
+// Issue #993 — Atomic "Batch-Submit" Progress Overlay
 
 import { useEffect, useState } from "react";
+import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
 
 const SESSION_KEY = "stellarstream_batch_progress";
 
@@ -13,6 +14,8 @@ export interface BatchProgressState {
   total: number;
   /** 'running' | 'done' | 'error' */
   status: "running" | "done" | "error";
+  /** Per-batch results, indexed 0…total-1 */
+  batchResults?: Array<{ status: "pending" | "success" | "error"; txHash?: string; error?: string }>;
 }
 
 // ── Persistence helpers ──────────────────────────────────────────────────────
@@ -55,9 +58,21 @@ export function BatchProgressOverlay({ progress, onDismiss }: Props) {
     if (progress) setHydrated(progress);
   }, [progress]);
 
+  // Prevent tab close while batches are running
+  useEffect(() => {
+    if (!hydrated || hydrated.status !== "running") return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hydrated?.status]);
+
   if (!hydrated || hydrated.status === "done") return null;
 
   const pct = hydrated.total > 0 ? Math.round((hydrated.current / hydrated.total) * 100) : 0;
+  const results = hydrated.batchResults ?? [];
 
   return (
     <div
@@ -96,6 +111,30 @@ export function BatchProgressOverlay({ progress, onDismiss }: Props) {
           }}
         />
       </div>
+
+      {/* Per-batch status rows */}
+      {results.length > 0 && (
+        <div className="mb-3 max-h-36 overflow-y-auto space-y-1 rounded-xl border border-white/[0.06] bg-white/[0.02] p-2">
+          {results.map((r, i) => (
+            <div key={i} className="flex items-center justify-between text-[11px]">
+              <span className="text-white/40">Batch {i + 1}</span>
+              {r.status === "success" ? (
+                <span className="flex items-center gap-1 text-emerald-400">
+                  <CheckCircle2 size={11} /> Confirmed
+                </span>
+              ) : r.status === "error" ? (
+                <span className="flex items-center gap-1 text-red-400" title={r.error}>
+                  <XCircle size={11} /> Failed
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-white/30">
+                  <Loader2 size={11} className="animate-spin" /> Pending
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Warning */}
       <div className="flex items-center gap-2 rounded-lg border border-amber-400/20 bg-amber-400/[0.06] px-3 py-2">

@@ -53,6 +53,11 @@ export interface FlowRecipient {
   label?: string;
   asset?: string;
   deliveryStatus?: "delivered" | "in_transit" | "pending" | string;
+  /** If set, this recipient is a bridge address routing to another chain */
+  bridgeDestination?: {
+    chain: "Polygon" | "Ethereum" | "Arbitrum" | "Base" | "Solana" | string;
+    address?: string;
+  };
 }
 
 interface Props {
@@ -81,6 +86,51 @@ const CONTINENT_PATHS = [
   // Oceania
   "M 630 210 L 680 205 L 710 220 L 705 250 L 670 255 L 635 245 Z",
 ];
+
+// ─── Bridge chain metadata ────────────────────────────────────────────────────
+
+const CHAIN_COLORS: Record<string, string> = {
+  Polygon: "#8247e5",
+  Ethereum: "#627eea",
+  Arbitrum: "#28a0f0",
+  Base: "#0052ff",
+  Solana: "#9945ff",
+};
+
+function chainColor(chain: string): string {
+  return CHAIN_COLORS[chain] ?? "#a0a0a0";
+}
+
+/** Holographic breadcrumb: Sender → Stellar → Bridge → Destination Chain */
+function BridgeBreadcrumb({ chain, address }: { chain: string; address?: string }) {
+  const color = chainColor(chain);
+  const steps = ["Sender", "Stellar", "Bridge", chain];
+  return (
+    <div
+      className="mt-2 flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-mono"
+      style={{
+        background: `linear-gradient(90deg, ${color}18, ${color}08)`,
+        border: `1px solid ${color}40`,
+      }}
+    >
+      {steps.map((step, i) => (
+        <span key={step} className="flex items-center gap-1">
+          <span style={{ color: i === steps.length - 1 ? color : "rgba(255,255,255,0.45)" }}>
+            {step}
+          </span>
+          {i < steps.length - 1 && (
+            <span style={{ color: `${color}60` }}>›</span>
+          )}
+        </span>
+      ))}
+      {address && (
+        <span className="ml-1 opacity-50">
+          ({address.slice(0, 6)}…)
+        </span>
+      )}
+    </div>
+  );
+}
 
 // ─── Beam component ───────────────────────────────────────────────────────────
 
@@ -338,27 +388,50 @@ export function CapitalFlowMap({
         </text>
 
         {/* Recipient nodes */}
-        {filteredRecipients.map((r) => (
-          <g key={r.address} opacity={r.isFaded ? 0.35 : 1}>
-            <circle
-              cx={r.region.x}
-              cy={r.region.y}
-              r={4}
-              fill={isExecuting ? (r.isFaded ? "rgba(34,211,238,0.25)" : "#22d3ee") : "rgba(255,255,255,0.2)"}
-              filter={isExecuting && !r.isFaded ? "url(#node-glow)" : undefined}
-            />
-            <text
-              x={r.region.x}
-              y={r.region.y + 12}
-              textAnchor="middle"
-              fontSize="6.5"
-              fill={r.isFaded ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.35)"}
-              fontFamily="monospace"
-            >
-              {r.label ?? `${r.address.slice(0, 5)}…`}
-            </text>
-          </g>
-        ))}
+        {filteredRecipients.map((r) => {
+          const isBridge = Boolean(r.bridgeDestination);
+          const nodeColor = isBridge
+            ? chainColor(r.bridgeDestination!.chain)
+            : isExecuting && !r.isFaded
+            ? "#22d3ee"
+            : "rgba(255,255,255,0.2)";
+          return (
+            <g key={r.address} opacity={r.isFaded ? 0.35 : 1}>
+              <circle
+                cx={r.region.x}
+                cy={r.region.y}
+                r={isBridge ? 5.5 : 4}
+                fill={r.isFaded ? "rgba(34,211,238,0.25)" : nodeColor}
+                filter={isExecuting && !r.isFaded ? "url(#node-glow)" : undefined}
+                strokeWidth={isBridge ? 1.5 : 0}
+                stroke={isBridge ? chainColor(r.bridgeDestination!.chain) : "none"}
+              />
+              {isBridge && (
+                <text
+                  x={r.region.x}
+                  y={r.region.y - 9}
+                  textAnchor="middle"
+                  fontSize="7"
+                  fill={chainColor(r.bridgeDestination!.chain)}
+                  fontFamily="monospace"
+                  opacity={r.isFaded ? 0.3 : 0.9}
+                >
+                  ⬡ {r.bridgeDestination!.chain}
+                </text>
+              )}
+              <text
+                x={r.region.x}
+                y={r.region.y + 12}
+                textAnchor="middle"
+                fontSize="6.5"
+                fill={r.isFaded ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.35)"}
+                fontFamily="monospace"
+              >
+                {r.label ?? `${r.address.slice(0, 5)}…`}
+              </text>
+            </g>
+          );
+        })}
       </svg>
 
       <div className="absolute right-4 top-4 z-20 w-[220px] rounded-3xl border border-white/10 bg-[#06070f]/95 p-3 shadow-2xl backdrop-blur-xl">
@@ -413,6 +486,22 @@ export function CapitalFlowMap({
           Showing {visibleCount} of {recipientNodes.length} flows
           {showUSDCOnly ? ` · USDC only (${assetCount})` : ""}
         </div>
+
+        {/* Bridge destinations */}
+        {recipientNodes.some((r) => r.bridgeDestination) && (
+          <div className="mt-3 space-y-1.5">
+            <p className="text-[10px] uppercase tracking-[0.24em] text-white/40">Bridge Routes</p>
+            {recipientNodes
+              .filter((r) => r.bridgeDestination)
+              .map((r) => (
+                <BridgeBreadcrumb
+                  key={r.address}
+                  chain={r.bridgeDestination!.chain}
+                  address={r.bridgeDestination!.address}
+                />
+              ))}
+          </div>
+        )}
       </div>
 
       {/* Legend */}
@@ -424,6 +513,10 @@ export function CapitalFlowMap({
         <div className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-white/20" />
           <span className="text-[10px] text-white/30">Recipient</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full" style={{ background: "#8247e5" }} />
+          <span className="text-[10px] text-white/30">Bridge</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="h-px w-4 bg-cyan-400/40" />
