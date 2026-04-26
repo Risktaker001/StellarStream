@@ -1,0 +1,45 @@
+module.exports = {
+  apps: [
+    {
+      name: "stellarstream-api",
+      script: "./dist/index.js",
+      instances: "max",
+      exec_mode: "cluster",
+      env: {
+        NODE_ENV: "production",
+        PORT: 3000,
+      },
+      error_file: "./logs/error.log",
+      out_file: "./logs/out.log",
+      log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+      merge_logs: true,
+      max_memory_restart: "500M",
+      watch: false,
+      ignore_watch: ["node_modules", "dist", "logs"],
+      max_restarts: 10,
+      min_uptime: "10s",
+      autorestart: true,
+      kill_timeout: 5000,
+      listen_timeout: 3000,
+      shutdown_with_message: true,
+    },
+    {
+      name: "stellarstream-indexer",
+      script: "./dist/indexer.ts",
+      instances: 1,
+      exec_mode: "fork",
+      env: {
+        NODE_ENV: "production",
+      },
+      error_file: "./logs/indexer-error.log",
+      out_file: "./logs/indexer-out.log",
+      log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+      max_memory_restart: "300M",
+      autorestart: true,
+      kill_timeout: 5000,
+    },
+  ],
+  module_conf: {
+    network_interface: "eth0",
+  },
+};

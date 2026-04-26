@@ -1,0 +1,36 @@
+[package]
+name = "stellarstream-contracts"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+# Optional test modules that require contract methods not yet implemented
+vault_tests = []
+allowlist_tests = []
+clawback_tests = []
+dispute_tests = []
+voting_tests = []
+# Disabled - requires additional implementations
+extended_tests = []
+
+[dependencies]
+soroban-sdk = "22.0.10"
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.10", features = ["testutils"] }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true

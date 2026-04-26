@@ -1,0 +1,995 @@
+@import url('https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,100;0,300;0,400;0,700;0,900;1,100;1,300;1,400;1,700;1,900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  /* Stellar Glass Design System Colors */
+  --stellar-primary: #00f5ff;
+  --stellar-secondary: #8a00ff;
+  --stellar-background: #030303;
+  --stellar-foreground: #ffffff;
+
+  /* Glass surface tokens — used as fallbacks when backdrop-filter is unsupported */
+  --glass-surface-dark:  rgba(10, 10, 20, 0.92);
+  --glass-surface-modal: rgba(7, 10, 18, 0.96);
+  --glass-surface-card:  rgba(10, 10, 20, 0.88);
+  --glass-surface-pill:  rgba(10, 10, 20, 0.80);
+}
+
+@theme inline {
+  --color-primary: var(--stellar-primary);
+  --color-secondary: var(--stellar-secondary);
+  --color-background: var(--stellar-background);
+  --color-foreground: var(--stellar-foreground);
+  --font-heading: var(--font-lato);
+  --font-body: var(--font-poppins);
+}
+
+/* GlassCard Utility Class */
+@utility glass-card {
+  @apply bg-white/5 border border-white/[0.08] rounded-2xl;
+  /* Progressive enhancement: blur only when supported */
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    @apply backdrop-blur-lg;
+  }
+  /* Fallback: deepen background opacity when blur is unavailable */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background: var(--glass-surface-card);
+  }
+}
+
+/* Monospaced ticker font utility — use for addresses, hashes, numeric data */
+@utility font-ticker {
+  font-family: "Plus Jakarta Sans", "SFMono-Regular", Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+body {
+  background: var(--stellar-background);
+  color: var(--stellar-foreground);
+  font-family: "Poppins", var(--font-poppins), sans-serif;
+}
+
+.font-heading {
+  font-family: "Lato", var(--font-lato), sans-serif;
+}
+
+.font-body {
+  font-family: "Poppins", var(--font-poppins), sans-serif;
+}
+
+.font-ticker {
+  font-family: "Plus Jakarta Sans", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes ticker-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.ticker-track {
+  animation: ticker-scroll 18s linear infinite;
+}
+
+.nebula-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  opacity: 0.45;
+  will-change: transform;
+}
+
+.nebula-cyan {
+  top: -14rem;
+  left: -10rem;
+  width: 36rem;
+  height: 36rem;
+  background: radial-gradient(circle at 35% 35%, #00f5ff, transparent 72%);
+  animation: nebula-drift-1 18s ease-in-out infinite;
+}
+
+.nebula-violet {
+  right: -14rem;
+  bottom: -16rem;
+  width: 40rem;
+  height: 40rem;
+  background: radial-gradient(circle at 65% 60%, #8a00ff, transparent 72%);
+  animation: nebula-drift-2 22s ease-in-out infinite;
+}
+
+/* ── Nebula Blob Animations ── */
+@keyframes nebula-drift-1 {
+  0%,
+  100% {
+    transform: translate(0%, 0%) scale(1);
+  }
+  25% {
+    transform: translate(5%, -8%) scale(1.1);
+  }
+  50% {
+    transform: translate(-3%, 5%) scale(0.95);
+  }
+  75% {
+    transform: translate(8%, 3%) scale(1.05);
+  }
+}
+
+@keyframes nebula-drift-2 {
+  0%,
+  100% {
+    transform: translate(0%, 0%) scale(1);
+  }
+  25% {
+    transform: translate(-6%, 4%) scale(1.08);
+  }
+  50% {
+    transform: translate(4%, -6%) scale(0.92);
+  }
+  75% {
+    transform: translate(-3%, -4%) scale(1.12);
+  }
+}
+
+/* Liquid Chrome Gradient for headline */
+@utility liquid-chrome {
+  background: linear-gradient(
+    135deg,
+    #ffffff 0%,
+    #00f5ff 40%,
+    #8a00ff 70%,
+    #ffffff 100%
+  );
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: chrome-shift 6s ease-in-out infinite;
+}
+
+@keyframes chrome-shift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* Neon Glow CTA */
+@utility neon-glow {
+  box-shadow: 0 0 15px rgba(0, 245, 255, 0.4), 0 0 40px rgba(0, 245, 255, 0.15),
+    inset 0 0 15px rgba(0, 245, 255, 0.05);
+}
+
+@utility neon-glow-hover {
+  box-shadow: 0 0 20px rgba(0, 245, 255, 0.6), 0 0 60px rgba(0, 245, 255, 0.25),
+    inset 0 0 20px rgba(0, 245, 255, 0.1);
+}
+
+/* Action button 2px glow ring — apply on hover for all CTA buttons */
+@utility btn-glow-cyan {
+  box-shadow: 0 0 0 2px rgba(0, 245, 255, 0.5), 0 0 16px rgba(0, 245, 255, 0.25);
+}
+
+@utility btn-glow-violet {
+  box-shadow: 0 0 0 2px rgba(138, 0, 255, 0.5), 0 0 16px rgba(138, 0, 255, 0.25);
+}
+
+@utility btn-glow-emerald {
+  box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.6), 0 0 16px rgba(52, 211, 153, 0.3);
+}
+
+/* Cyan Pulse Border Animation for Active Streams */
+@keyframes pulse-border {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(0, 245, 255, 0.4),
+                0 0 15px rgba(0, 245, 255, 0.2),
+                inset 0 0 10px rgba(0, 245, 255, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(0, 245, 255, 0.6),
+                0 0 25px rgba(0, 245, 255, 0.4),
+                inset 0 0 15px rgba(0, 245, 255, 0.15);
+  }
+}
+
+.animate-pulse-border {
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+/* Token Selector Custom Scrollbar */
+.token-selector-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.token-selector-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.token-selector-scroll::-webkit-scrollbar-thumb {
+  background: var(--stellar-primary);
+  border-radius: 2px;
+}
+
+.token-selector-scroll::-webkit-scrollbar-thumb:hover {
+  background: #00d4e6;
+}
+
+/* Custom scrollbar for Stellar Glass aesthetic */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--stellar-background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--stellar-primary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--stellar-secondary);
+}
+
+/* Stream list scrollbar - thinner and more subtle */
+.stream-list-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.stream-list-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.stream-list-scroll::-webkit-scrollbar-thumb {
+  background: rgba(138, 0, 255, 0.3);
+  border-radius: 3px;
+}
+
+.stream-list-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(138, 0, 255, 0.5);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Stellar Glass Toast Notifications
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Toast Container */
+[data-sonner-toaster] {
+  font-family: "Poppins", var(--font-poppins), sans-serif;
+}
+
+[data-sonner-toaster][data-y-position="bottom"] {
+  bottom: 24px;
+}
+
+[data-sonner-toaster][data-x-position="right"] {
+  right: 24px;
+}
+
+/* Base Toast Styles - Glass Morphism */
+.stellar-toast {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 360px;
+  max-width: 420px;
+  padding: 16px 18px 20px;
+  /* Fallback solid background — visible on all browsers */
+  background: var(--glass-surface-dark);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 0 20px rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+  /* Prevent compositor layer promotion during animation from invalidating blur — blur-flicker fix */
+  transform: translateZ(0);
+  animation: toast-slide-in 0.3s cubic-bezier(0.21, 1.02, 0.73, 1) forwards;
+}
+
+/* Progressive enhancement: backdrop blur only when supported */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .stellar-toast {
+    background: rgba(10, 10, 20, 0.85);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+}
+
+@keyframes toast-slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Glass Sheen Effect */
+.stellar-toast::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at 20% 20%,
+    rgba(255, 255, 255, 0.08) 0%,
+    transparent 50%
+  );
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* Toast Icon Container */
+.stellar-toast-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Toast Content */
+.stellar-toast-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+.stellar-toast-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.stellar-toast-description {
+  font-size: 13px;
+  font-weight: 400;
+  color: rgba(232, 234, 246, 0.7);
+  line-height: 1.5;
+}
+
+/* Stellar.Expert Link */
+.stellar-toast-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 6px 10px;
+  background: rgba(0, 245, 255, 0.08);
+  border: 1px solid rgba(0, 245, 255, 0.2);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #00f5ff;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  width: fit-content;
+}
+
+.stellar-toast-link:hover {
+  background: rgba(0, 245, 255, 0.15);
+  border-color: rgba(0, 245, 255, 0.4);
+  box-shadow: 0 0 12px rgba(0, 245, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.stellar-toast-link:active {
+  transform: translateY(0);
+}
+
+/* Progress Bar - Hyper Violet */
+.stellar-toast-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(138, 0, 255, 0.15);
+  overflow: hidden;
+}
+
+.stellar-toast-progress::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #8a00ff, #b84dff);
+  box-shadow: 0 0 8px rgba(138, 0, 255, 0.6);
+  animation: toast-progress var(--duration, 5000ms) linear forwards;
+}
+
+@keyframes toast-progress {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Toast Variants
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Success Toast */
+.stellar-toast-success {
+  border-color: rgba(0, 245, 255, 0.25);
+}
+
+.stellar-toast-success::before {
+  background: radial-gradient(
+    ellipse at 20% 20%,
+    rgba(0, 245, 255, 0.12) 0%,
+    transparent 60%
+  );
+}
+
+.stellar-toast-success .stellar-toast-icon {
+  background: rgba(0, 245, 255, 0.12);
+  border: 1px solid rgba(0, 245, 255, 0.3);
+  color: #00f5ff;
+  box-shadow: 0 0 16px rgba(0, 245, 255, 0.2);
+}
+
+/* Error Toast */
+.stellar-toast-error {
+  border-color: rgba(255, 59, 92, 0.25);
+}
+
+.stellar-toast-error::before {
+  background: radial-gradient(
+    ellipse at 20% 20%,
+    rgba(255, 59, 92, 0.1) 0%,
+    transparent 60%
+  );
+}
+
+.stellar-toast-error .stellar-toast-icon {
+  background: rgba(255, 59, 92, 0.12);
+  border: 1px solid rgba(255, 59, 92, 0.3);
+  color: #ff3b5c;
+  box-shadow: 0 0 16px rgba(255, 59, 92, 0.2);
+}
+
+/* Warning Toast */
+.stellar-toast-warning {
+  border-color: rgba(255, 179, 0, 0.25);
+}
+
+.stellar-toast-warning::before {
+  background: radial-gradient(
+    ellipse at 20% 20%,
+    rgba(255, 179, 0, 0.1) 0%,
+    transparent 60%
+  );
+}
+
+.stellar-toast-warning .stellar-toast-icon {
+  background: rgba(255, 179, 0, 0.12);
+  border: 1px solid rgba(255, 179, 0, 0.3);
+  color: #ffb300;
+  box-shadow: 0 0 16px rgba(255, 179, 0, 0.2);
+}
+
+/* Info Toast */
+.stellar-toast-info {
+  border-color: rgba(138, 0, 255, 0.25);
+}
+
+.stellar-toast-info::before {
+  background: radial-gradient(
+    ellipse at 20% 20%,
+    rgba(138, 0, 255, 0.12) 0%,
+    transparent 60%
+  );
+}
+
+.stellar-toast-info .stellar-toast-icon {
+  background: rgba(138, 0, 255, 0.12);
+  border: 1px solid rgba(138, 0, 255, 0.3);
+  color: #8a00ff;
+  box-shadow: 0 0 16px rgba(138, 0, 255, 0.2);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Responsive Adjustments
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 640px) {
+  [data-sonner-toaster][data-x-position="right"] {
+    right: 16px;
+    left: 16px;
+  }
+
+  .stellar-toast {
+    min-width: unset;
+    max-width: unset;
+    width: 100%;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Stellar Ledger Loader
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 3D Transform utilities */
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+/* Ledger loader backdrop blur */
+.ledger-loader-backdrop {
+  /* Fallback for unsupported browsers */
+  background: var(--glass-surface-modal);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .ledger-loader-backdrop {
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    background: transparent;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Accessibility
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .stellar-toast {
+    animation: none;
+    /* Snap to visible state immediately */
+    opacity: 1;
+    transform: translateX(0) translateZ(0);
+  }
+
+  .stellar-toast-progress::after {
+    animation: none;
+    width: 0;
+  }
+
+  /* Disable complex animations for ledger loader */
+  [data-ledger-loader] * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  /* Nebula background blobs */
+  .nebula-cyan,
+  .nebula-violet {
+    animation: none;
+  }
+
+  /* Liquid chrome headline gradient */
+  .liquid-chrome {
+    animation: none;
+    background-position: 0% 50%;
+  }
+
+  /* Ticker scroll */
+  .ticker-track {
+    animation: none;
+  }
+
+  /* Pulse border on active streams */
+  .animate-pulse-border {
+    animation: none;
+  }
+
+  /* Bento grid enter / shimmer / ghost-pulse */
+  .animate-bento-enter {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .animate-shimmer {
+    animation: none;
+  }
+
+  .animate-ghost-pulse {
+    animation: none;
+  }
+
+  /* CRT scanlines flicker */
+  .crt-scanlines {
+    animation: none;
+  }
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   Global Error Boundary - "The Glitch Screen"
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Digital Glitch Animation for Error Codes */
+.glitch-text {
+  position: relative;
+  color: #ffffff;
+  text-shadow: 
+    0 0 10px rgba(0, 245, 255, 0.5),
+    0 0 20px rgba(0, 245, 255, 0.3),
+    0 0 40px rgba(0, 245, 255, 0.1);
+}
+
+.glitch-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  font-size: inherit;
+  font-weight: inherit;
+  font-family: inherit;
+  pointer-events: none;
+}
+
+.glitch-layer-1 {
+  color: #00f5ff;
+  animation: glitch-1 2s infinite linear alternate-reverse;
+}
+
+.glitch-layer-2 {
+  color: #ff3b5c;
+  animation: glitch-2 3s infinite linear alternate-reverse;
+}
+
+@keyframes glitch-1 {
+  0% {
+    clip-path: polygon(0 2%, 100% 2%, 100% 5%, 0 5%);
+    transform: translate(-2px, 0);
+  }
+  2% {
+    clip-path: polygon(0 78%, 100% 78%, 100% 100%, 0 100%);
+    transform: translate(-1px, 0);
+  }
+  4% {
+    clip-path: polygon(0 78%, 100% 78%, 100% 100%, 0 100%);
+    transform: translate(1px, 0);
+  }
+  6% {
+    clip-path: polygon(0 78%, 100% 78%, 100% 100%, 0 100%);
+    transform: translate(0, 0);
+  }
+  8% {
+    clip-path: polygon(0 54%, 100% 54%, 100% 44%, 0 44%);
+    transform: translate(-1px, 0);
+  }
+  10% {
+    clip-path: polygon(0 54%, 100% 54%, 100% 44%, 0 44%);
+    transform: translate(2px, 0);
+  }
+  12% {
+    clip-path: polygon(0 54%, 100% 54%, 100% 44%, 0 44%);
+    transform: translate(0, 0);
+  }
+  14% {
+    clip-path: polygon(0 0%, 100% 0%, 100% 0%, 0 0%);
+    transform: translate(0, 0);
+  }
+  100% {
+    clip-path: polygon(0 0%, 100% 0%, 100% 0%, 0 0%);
+    transform: translate(0, 0);
+  }
+}
+
+@keyframes glitch-2 {
+  0% {
+    clip-path: polygon(0 25%, 100% 25%, 100% 30%, 0 30%);
+    transform: translate(1px, 0);
+  }
+  3% {
+    clip-path: polygon(0 3%, 100% 3%, 100% 3%, 0 3%);
+    transform: translate(-1px, 0);
+  }
+  5% {
+    clip-path: polygon(0 5%, 100% 5%, 100% 20%, 0 20%);
+    transform: translate(1px, 0);
+  }
+  7% {
+    clip-path: polygon(0 20%, 100% 20%, 100% 20%, 0 20%);
+    transform: translate(-2px, 0);
+  }
+  9% {
+    clip-path: polygon(0 40%, 100% 40%, 100% 40%, 0 40%);
+    transform: translate(1px, 0);
+  }
+  11% {
+    clip-path: polygon(0 52%, 100% 52%, 100% 59%, 0 59%);
+    transform: translate(-1px, 0);
+  }
+  13% {
+    clip-path: polygon(0 60%, 100% 60%, 100% 60%, 0 60%);
+    transform: translate(2px, 0);
+  }
+  15% {
+    clip-path: polygon(0 0%, 100% 0%, 100% 0%, 0 0%);
+    transform: translate(0, 0);
+  }
+  100% {
+    clip-path: polygon(0 0%, 100% 0%, 100% 0%, 0 0%);
+    transform: translate(0, 0);
+  }
+}
+
+/* CRT Scanlines Effect */
+.crt-scanlines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 245, 255, 0.03) 2px,
+    rgba(0, 245, 255, 0.03) 4px
+  );
+  pointer-events: none;
+  animation: scanlines-flicker 0.15s linear infinite;
+}
+
+@keyframes scanlines-flicker {
+  0% { opacity: 1; }
+  98% { opacity: 1; }
+  99% { opacity: 0.98; }
+  100% { opacity: 1; }
+}
+
+/* Enhanced Neon Glow for Error Pages */
+@utility neon-glow-error {
+  box-shadow: 0 0 15px rgba(255, 59, 92, 0.4), 0 0 40px rgba(255, 59, 92, 0.15),
+    inset 0 0 15px rgba(255, 59, 92, 0.05);
+}
+
+@utility neon-glow-error-hover {
+  box-shadow: 0 0 20px rgba(255, 59, 92, 0.6), 0 0 60px rgba(255, 59, 92, 0.25),
+    inset 0 0 20px rgba(255, 59, 92, 0.1);
+}
+
+/* Accessibility - Reduce motion for glitch effects */
+@media (prefers-reduced-motion: reduce) {
+  .glitch-layer-1,
+  .glitch-layer-2 {
+    animation: none;
+  }
+  
+  .crt-scanlines {
+    animation: none;
+    opacity: 0.5;
+  }
+  
+  .glitch-text {
+    text-shadow: 0 0 5px rgba(0, 245, 255, 0.3);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Bento Grid Dashboard Animations (Issue #522)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Ghost Glass Shimmer Animation */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+/* Bento Tile Hover Scale */
+@keyframes bento-tile-enter {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-bento-enter {
+  animation: bento-tile-enter 0.3s ease-out forwards;
+}
+
+/* Ghost Glass Border Pulse */
+@keyframes ghost-pulse {
+  0%, 100% {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  50% {
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+}
+
+.animate-ghost-pulse {
+  animation: ghost-pulse 3s ease-in-out infinite;
+}
+/* ============================================= */
+/* Aria-Glow High Contrast Mode (Accessibility)  */
+/* ============================================= */
+
+.high-contrast {
+  --glass-bg: #ffffff;
+  --glass-border: #000000;
+}
+
+/* Remove glassmorphism effects */
+.high-contrast .glass,
+.high-contrast [class*="glass"] {
+  background: #ffffff !important;
+  border: 2px solid #000000 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.high-contrast .dark .glass,
+.high-contrast .dark [class*="glass"] {
+  background: #000000 !important;
+  border: 2px solid #ffffff !important;
+  color: #ffffff;
+}
+
+/* Stronger buttons */
+.high-contrast button,
+.high-contrast .btn,
+.high-contrast [role="button"] {
+  border: 2px solid #000000 !important;
+  background: #ffffff !important;
+  color: #000000 !important;
+  font-weight: 600;
+}
+
+.high-contrast .dark button,
+.high-contrast .dark .btn,
+.high-contrast .dark [role="button"] {
+  border: 2px solid #ffffff !important;
+  background: #000000 !important;
+  color: #ffffff !important;
+}
+
+/* Better focus rings for keyboard users */
+.high-contrast *:focus-visible {
+  outline: 3px solid #000000 !important;
+  outline-offset: 4px;
+}
+
+.high-contrast .dark *:focus-visible {
+  outline: 3px solid #ffffff !important;
+}
+
+/* Cards and containers */
+.high-contrast .card,
+.high-contrast .stream-card,
+.high-contrast [class*="card"] {
+  border: 2px solid #000000 !important;
+  background: #ffffff !important;
+}
+
+.high-contrast .dark .card,
+.high-contrast .dark .stream-card,
+.high-contrast .dark [class*="card"] {
+  border: 2px solid #ffffff !important;
+  background: #000000 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Dark-HC — High-Contrast Dark Mode for Late-Night Treasury Management
+   Applied via .dark-hc on <html>. All glass colors mapped to a dark-spectrum
+   palette with WCAG AA-compliant contrast ratios.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.dark-hc {
+  /* Core palette — deep navy base, high-luminance accents */
+  --stellar-primary:    #00e5ff;   /* cyan shifted brighter for contrast */
+  --stellar-secondary:  #b060ff;   /* violet lifted for legibility */
+  --stellar-background: #050a14;   /* near-black navy */
+  --stellar-foreground: #e8f0fe;   /* off-white, easier on eyes than pure white */
+
+  /* Glass surface tokens */
+  --glass-bg:           rgba(8, 16, 32, 0.92);
+  --glass-border:       rgba(0, 229, 255, 0.18);
+  --glass-sheen:        rgba(0, 229, 255, 0.06);
+
+  /* Text hierarchy */
+  --text-primary:       #e8f0fe;
+  --text-secondary:     #94a3b8;
+  --text-muted:         #475569;
+
+  /* Status colors — boosted saturation for dark backgrounds */
+  --color-success:      #00e5a0;
+  --color-warning:      #fbbf24;
+  --color-error:        #ff4d6d;
+  --color-info:         #60a5fa;
+}
+
+/* Override body background and text */
+.dark-hc body {
+  background: var(--stellar-background);
+  color: var(--stellar-foreground);
+}
+
+/* Glass card — replace translucent white with deep navy glass */
+.dark-hc .glass-card,
+.dark-hc [class*="glass"] {
+  background: var(--glass-bg) !important;
+  border-color: var(--glass-border) !important;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.7),
+    inset 0 0 20px var(--glass-sheen) !important;
+}
+
+/* Nebula blobs — desaturate and dim so they don't bleed into text */
+.dark-hc .nebula-cyan {
+  opacity: 0.18;
+  background: radial-gradient(circle at 35% 35%, #00e5ff, transparent 72%);
+}
+
+.dark-hc .nebula-violet {
+  opacity: 0.15;
+  background: radial-gradient(circle at 65% 60%, #7c3aed, transparent 72%);
+}
+
+/* Neon glows — tighter, less bloom for professional readability */
+.dark-hc .neon-glow,
+.dark-hc [class*="neon-glow"] {
+  box-shadow:
+    0 0 8px rgba(0, 229, 255, 0.35),
+    0 0 20px rgba(0, 229, 255, 0.1),
+    inset 0 0 8px rgba(0, 229, 255, 0.04) !important;
+}
+
+/* Pulse border — slower, less distracting at night */
+.dark-hc .animate-pulse-border {
+  animation-duration: 3s;
+}
+
+/* Scrollbars — match dark-hc palette */
+.dark-hc ::-webkit-scrollbar-track { background: var(--stellar-background); }
+.dark-hc ::-webkit-scrollbar-thumb { background: var(--stellar-primary); }
+.dark-hc ::-webkit-scrollbar-thumb:hover { background: var(--stellar-secondary); }
+
+/* Toast overrides */
+.dark-hc .stellar-toast {
+  background: rgba(5, 10, 20, 0.95);
+  border-color: var(--glass-border);
+}
+
+/* Focus rings — high-visibility for keyboard navigation */
+.dark-hc *:focus-visible {
+  outline: 2px solid var(--stellar-primary) !important;
+  outline-offset: 3px;
+}

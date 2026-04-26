@@ -1,0 +1,10 @@
+{
+  "name": "StellarStream Contract V2",
+  "version": 2,
+  "spec_version": "2.0.0",
+  "description": "Streaming payment contract for StellarStream V2.",
+  "project": "StellarStream",
+  "repository": "https://github.com/Emmyt24/StellarStream",
+  "contract_path": "contracts/Contract-V2",
+  "metadata_uri": "https://raw.githubusercontent.com/Emmyt24/StellarStream/main/contracts/Contract-V2/contract-metadata.json"
+}
