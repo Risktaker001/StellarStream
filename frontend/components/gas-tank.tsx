@@ -14,12 +14,15 @@
  * - Visual fuel gauge with animated liquid
  * - "Cosmic Red" warning state when balance < 5 XLM
  * - Refill links to LOBSTR/Binance swap pages
+ * - Splits Remaining Calculator: Shows "Approx. X splits remaining" based on
+ *   current balance and average split cost (balance / average_split_cost)
  */
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ExternalLink, Wallet, AlertTriangle, X, Sparkles } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
+import { useSplitsRemaining } from "@/lib/use-splits-remaining";
 import { GasTankAdvisor } from "./dashboard/GasTankAdvisor";
 
 // Refill links for different exchanges
@@ -46,6 +49,9 @@ export default function GasTank({
   const [error, setError] = useState<string | null>(null);
   const [showRefillModal, setShowRefillModal] = useState(false);
   const [showAdvisor, setShowAdvisor] = useState(false);
+  
+  // Get splits remaining calculation
+  const { approximateSplits, isLoading: splitsLoading } = useSplitsRemaining(balance);
 
   // Fetch XLM balance
   const fetchBalance = useCallback(async () => {
@@ -236,6 +242,35 @@ export default function GasTank({
           font-size: 11px;
           color: rgba(255, 255, 255, 0.4);
           letter-spacing: 0.05em;
+        }
+
+        /* Splits Remaining Indicator */
+        .splits-remaining {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          padding: 8px 12px;
+          background: linear-gradient(135deg, rgba(0, 229, 255, 0.08), rgba(0, 160, 200, 0.05));
+          border: 1px solid rgba(0, 229, 255, 0.15);
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #00e5ff;
+          width: 100%;
+          text-align: center;
+        }
+
+        .splits-remaining-label {
+          font-size: 10px;
+          color: rgba(255, 255, 255, 0.5);
+          letter-spacing: 0.05em;
+        }
+
+        .splits-remaining-value {
+          font-family: 'Space Mono', monospace;
+          font-weight: 700;
+          color: #00e5ff;
         }
 
         /* Warning Badge */
@@ -438,6 +473,15 @@ export default function GasTank({
             {isLoading ? "..." : balance.toFixed(2)}
           </span>
           <span className="balance-unit">XLM</span>
+        </div>
+
+        {/* Splits Remaining Indicator */}
+        <div className="splits-remaining">
+          <span className="splits-remaining-label">Approx.</span>
+          <span className="splits-remaining-value">
+            {splitsLoading ? "..." : approximateSplits}
+          </span>
+          <span className="splits-remaining-label">splits</span>
         </div>
 
         {/* Warning Badge - Cosmic Red */}
