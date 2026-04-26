@@ -196,6 +196,7 @@ const STEPS = [
   { number: 3, label: "Review & Sign", short: "Sign" },
 ];
 
+export const HIGH_VALUE_THRESHOLD = 10_000; // USDC
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n: number, d = 2) =>
   n.toLocaleString("en-US", {
@@ -1223,6 +1224,141 @@ function Step2({
   );
 }
 
+// ─── High-Value Confirm Modal (Issue #1022) ───────────────────────────────────
+export function HighValueConfirmModal({
+  amount,
+  asset,
+  onConfirm,
+  onClose,
+}: {
+  amount: number;
+  asset: string;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const required = `CONFIRM ${Math.round(amount)}`;
+  const matches = typed === required;
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const handleOverlay = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
+  return (
+    <div
+      onClick={handleOverlay}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(12px)" }}
+      data-testid="high-value-modal"
+    >
+      <div
+        className="relative w-full max-w-md rounded-3xl border border-orange-400/30 bg-white/[0.04] backdrop-blur-2xl overflow-hidden"
+        style={{
+          boxShadow: "0 0 0 1px rgba(251,146,60,0.12), 0 40px 80px rgba(0,0,0,0.8), 0 0 80px rgba(251,146,60,0.08)",
+          animation: "modalIn 0.25s cubic-bezier(0.16,1,0.3,1)",
+        }}
+      >
+        <style>{`@keyframes modalIn { from { opacity:0; transform:scale(0.93) translateY(12px) } to { opacity:1; transform:scale(1) translateY(0) } }`}</style>
+
+        <div className="p-6 md:p-8 space-y-6">
+          {/* Header */}
+          <div className="flex items-start justify-between">
+            <div>
+              <span className="inline-flex items-center gap-1.5 rounded-xl border border-orange-400/40 bg-orange-400/10 px-3 py-1 font-body text-xs font-bold tracking-wider uppercase text-orange-400">
+                ⚠ High-Value Transaction
+              </span>
+              <h2 className="font-heading mt-3 text-2xl md:text-3xl">Confirm Large Stream</h2>
+              <p className="font-body mt-1.5 text-sm text-white/50">
+                This stream exceeds{" "}
+                <span className="text-orange-400 font-bold">
+                  {HIGH_VALUE_THRESHOLD.toLocaleString()} {asset}
+                </span>
+                . Type the phrase below to proceed.
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="ml-4 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] font-body text-sm text-white/40 transition hover:bg-white/[0.08] hover:text-white/70"
+              aria-label="Cancel"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Amount display */}
+          <div className="rounded-2xl border border-orange-400/20 bg-orange-400/[0.05] px-5 py-4 text-center">
+            <p className="font-body text-[10px] tracking-widest text-white/35 uppercase mb-1">Stream Amount</p>
+            <p className="font-heading text-4xl text-orange-400 tabular-nums">
+              {amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <span className="font-body text-lg font-normal text-white/40 ml-2">{asset}</span>
+            </p>
+          </div>
+
+          {/* Confirmation input */}
+          <div className="space-y-2">
+            <label className="block font-body text-[10px] tracking-[0.12em] text-white/50 uppercase">
+              Type to confirm
+            </label>
+            <div
+              className="flex items-center rounded-2xl border bg-white/[0.03] px-4 py-3 transition-all duration-200"
+              style={{
+                borderColor: typed === ""
+                  ? "rgba(255,255,255,0.10)"
+                  : matches
+                  ? "rgba(34,211,238,0.4)"
+                  : "rgba(248,113,113,0.4)",
+                boxShadow: matches ? "0 0 0 1px rgba(34,211,238,0.15)" : "none",
+              }}
+            >
+              <input
+                type="text"
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                placeholder={required}
+                className="flex-1 bg-transparent font-body text-sm text-white/90 outline-none placeholder:text-white/20"
+                style={{ caretColor: "#22d3ee" }}
+                data-testid="confirm-input"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              {matches && <span className="text-cyan-400 text-sm ml-2">✓</span>}
+            </div>
+            <p className="font-body text-xs text-white/30">
+              Type exactly: <code className="text-orange-300/70">{required}</code>
+            </p>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 rounded-2xl border border-white/10 bg-white/[0.03] py-3.5 font-body text-sm text-white/50 transition hover:bg-white/[0.06] hover:text-white/80"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onConfirm}
+              disabled={!matches}
+              className="flex-1 rounded-2xl bg-cyan-400 py-3.5 font-body text-sm font-bold text-black transition hover:bg-cyan-300 disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ boxShadow: matches ? "0 0 24px rgba(34,211,238,0.35)" : "none" }}
+              data-testid="execute-btn"
+            >
+              Sign & Create Stream ✦
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Step 3: Review & Sign ────────────────────────────────────────────────────
 function Step3({
   form,
@@ -1397,11 +1533,6 @@ function Step3({
         </p>
       </div>
 
-      <button
-        onClick={onSign}
-        disabled={signing || isSelfReference || hasDuplicates}
-        className="w-full rounded-2xl bg-cyan-400 py-4 font-body text-base font-bold text-black transition-all duration-200 hover:bg-cyan-300 disabled:opacity-60 disabled:cursor-not-allowed"
-        style={{ boxShadow: signing ? "none" : "0 0 32px rgba(34,211,238,0.35)" }}
       <TransactionPrioritySelector
         selected={priorityTier}
         onChange={onPriorityChange}
@@ -1686,6 +1817,7 @@ export default function CreateStreamPage() {
   const [quickSignStatus, setQuickSignStatus] = useState<QuickSignStatus>("checking");
   const [quickSignError, setQuickSignError] = useState<string | null>(null);
   const [hasQuickSignCredential, setHasQuickSignCredential] = useState(false);
+  const [showFrictionGate, setShowFrictionGate] = useState(false);
   const wallet = useWallet();
 
   // ── Transaction priority (#456) ──────────────────────────────────────────────
@@ -1907,6 +2039,17 @@ export default function CreateStreamPage() {
   };
 
   const handleSign = async () => {
+    // ── High-value friction gate (#1022) ─────────────────────────────────────
+    const amount = parseFloat(form.totalAmount) || 0;
+    if (amount > HIGH_VALUE_THRESHOLD) {
+      setShowFrictionGate(true);
+      return;
+    }
+    await executeSign();
+  };
+
+  const executeSign = async () => {
+    setShowFrictionGate(false);
     if (quickSignStatus !== "verified") {
       setQuickSignError("Verify Quick-Sign before opening your wallet for signing.");
       return;
@@ -2179,6 +2322,16 @@ export default function CreateStreamPage() {
           closeConfirmModal();
         }}
       />
+
+      {/* High-value friction gate (#1022) */}
+      {showFrictionGate && (
+        <HighValueConfirmModal
+          amount={parseFloat(form.totalAmount) || 0}
+          asset={form.asset || "USDC"}
+          onConfirm={executeSign}
+          onClose={() => setShowFrictionGate(false)}
+        />
+      )}
     </div>
   );
 }

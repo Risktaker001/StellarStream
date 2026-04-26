@@ -6,6 +6,7 @@ import GasManagementTile from "@/components/settings/GasManagementTile";
 import { OrganizationAvatarBrandingCard } from "@/components/settings/OrganizationAvatarBrandingCard";
 import { AdminQuorumSettings } from "@/components/settings/AdminQuorumSettings";
 import { WebhookIntegrationsCard } from "@/components/settings/WebhookIntegrationsCard";
+import GasLedger from "@/components/gasledger";
 import { DeveloperSettingsCard } from "@/components/settings/DeveloperSettingsCard";
 import { TeamManagementCard } from "@/components/settings/TeamManagementCard";
 
@@ -53,6 +54,8 @@ export default function SettingsPage() {
           <TeamManagementCard />
           <OrganizationAvatarBrandingCard />
           <GasManagementTile />
+          {/* Gas Ledger — transaction history (#1023) */}
+          <GasLedger walletAddress="demo-wallet" />
         </>
       )}
 
