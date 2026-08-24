@@ -90,6 +90,14 @@ pub enum DataKey {
     UserSeen,
 
     // -----------------------------------------------------------------------
+    // Persistent storage: clawback records (long-term, TTL-extended on access).
+    // -----------------------------------------------------------------------
+    /// A clawback request by id.
+    Clawback(u64),
+    /// Next clawback id to allocate.
+    ClawbackCounter,
+
+    // -----------------------------------------------------------------------
     // Temporary storage: transaction-scoped, cleared automatically.
     // -----------------------------------------------------------------------
     /// Re-entrancy mutex (true while a protected call is executing).
@@ -183,4 +191,13 @@ pub fn bump_persistent_ttl_if_present(env: &Env, key: &DataKey) {
             .persistent()
             .extend_ttl(key, LEDGER_BUMP_SHARED, MAX_TTL_STREAM);
     }
+}
+
+/// Extend the TTL of a clawback request's persistent entry.
+pub fn extend_clawback_ttl(env: &Env, clawback_id: u64) {
+    env.storage().persistent().extend_ttl(
+        &DataKey::Clawback(clawback_id),
+        LEDGER_BUMP_SHARED,
+        MAX_TTL_STREAM,
+    );
 }

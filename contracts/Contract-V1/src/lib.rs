@@ -99,9 +99,15 @@
 pub mod flash_loan;
 pub mod math;
 pub mod storage;
+pub mod clawback;
+pub mod compliance;
 
 #[cfg(test)]
 mod bench_test;
+#[cfg(test)]
+mod clawback_test;
+#[cfg(test)]
+mod compliance_test;
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, Address,
@@ -186,6 +192,24 @@ pub enum Error {
     TreasuryNotSet = 39,
     InvalidMilestones = 40,
     InvalidMilestonePercentages = 41,
+
+    // ===== Clawback errors =====
+    /// No clawback request exists for the given ID.
+    ClawbackNotFound = 42,
+    /// The stream was not created with clawback enabled.
+    ClawbackNotEnabled = 43,
+    /// The requested clawback amount exceeds the amount already withdrawn.
+    ClawbackExceedsWithdrawn = 44,
+    /// The clawback request has already been executed.
+    ClawbackAlreadyExecuted = 45,
+    /// The clawback request has not yet received sufficient approvals.
+    ClawbackInsufficientApprovals = 46,
+    /// The approver has already approved this clawback request.
+    ClawbackAlreadyApproved = 47,
+    /// The clawback request has expired and can no longer be approved or executed.
+    ClawbackExpired = 48,
+    /// The clawback request was rejected.
+    ClawbackRejected = 49,
     // Flash loan errors (101-110)
     InsufficientFlashLiquidity = 101,
     InvalidFlashBorrowAmount = 102,
@@ -216,6 +240,8 @@ pub struct Stream {
     pub last_paused_at: u64,
     /// Present only when `curve_type == CURVE_MILESTONE`; see [`Milestone`].
     pub milestones: Option<Vec<Milestone>>,
+    /// If true, the sender may raise clawback requests on this stream.
+    pub clawback_enabled: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +422,153 @@ pub trait Token {
 }
 
 // ---------------------------------------------------------------------------
+// Clawback types
+// ---------------------------------------------------------------------------
+
+/// Lifecycle state of a clawback request.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ClawbackStatus {
+    Pending,
+    Approved,
+    Executed,
+    Rejected,
+}
+
+/// A clawback request allowing a stream sender to recover previously withdrawn tokens.
+///
+/// Opt-in: the stream must have been created with `clawback_enabled = true`.
+/// Amount cannot exceed `stream.withdrawn_amount`.
+#[contracttype]
+#[derive(Clone)]
+pub struct ClawbackRequest {
+    pub clawback_id: u64,
+    pub stream_id: u64,
+    pub amount: i128,
+    pub reason: String,
+    pub approved_by_receiver: bool,
+    pub approvals: Vec<Address>,
+    pub required_approvals: u32,
+    pub status: ClawbackStatus,
+    pub created_at: u64,
+    pub expires_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ClawbackRequestedEvent {
+    pub clawback_id: u64,
+    pub stream_id: u64,
+    pub sender: Address,
+    pub amount: i128,
+    pub reason: String,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ClawbackApprovedEvent {
+    pub clawback_id: u64,
+    pub approver: Address,
+    pub by_receiver: bool,
+    pub approval_count: u32,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ClawbackExecutedEvent {
+    pub clawback_id: u64,
+    pub stream_id: u64,
+    pub amount: i128,
+    pub sender: Address,
+    pub timestamp: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Clawback types
+// ---------------------------------------------------------------------------
+
+/// Lifecycle state of a clawback request.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ClawbackStatus {
+    /// Request created, awaiting approval.
+    Pending,
+    /// Sufficient approvals received; ready for execution.
+    Approved,
+    /// Tokens transferred back to sender.
+    Executed,
+    /// Expired or explicitly rejected; cannot progress further.
+    Rejected,
+}
+
+/// A clawback request: sender asks to recover previously withdrawn tokens.
+///
+/// Clawback is opt-in — the stream must have been created with
+/// `clawback_enabled = true`. The amount cannot exceed `withdrawn_amount`.
+///
+/// Approval path: either the receiver approves directly, or enough governance
+/// addresses accumulate approvals (`approvals.len() >= required_approvals`).
+#[contracttype]
+#[derive(Clone)]
+pub struct ClawbackRequest {
+    /// Unique request ID.
+    pub clawback_id: u64,
+    /// ID of the stream this clawback targets.
+    pub stream_id: u64,
+    /// Tokens to recover; must be > 0 and ≤ `stream.withdrawn_amount`.
+    pub amount: i128,
+    /// Human-readable reason for the clawback.
+    pub reason: String,
+    /// Whether the stream's receiver has approved.
+    pub approved_by_receiver: bool,
+    /// Governance addresses that have approved (multi-sig path).
+    pub approvals: Vec<Address>,
+    /// Number of governance approvals required if receiver does not approve.
+    pub required_approvals: u32,
+    /// Current status.
+    pub status: ClawbackStatus,
+    /// Ledger timestamp when the request was created.
+    pub created_at: u64,
+    /// Optional expiry timestamp (`0` = no expiry).
+    pub expires_at: u64,
+}
+
+/// Emitted when a clawback request is created.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ClawbackRequestedEvent {
+    pub clawback_id: u64,
+    pub stream_id: u64,
+    pub sender: Address,
+    pub amount: i128,
+    pub reason: String,
+    pub timestamp: u64,
+}
+
+/// Emitted when a clawback request receives an approval.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ClawbackApprovedEvent {
+    pub clawback_id: u64,
+    pub approver: Address,
+    pub by_receiver: bool,
+    pub approval_count: u32,
+    pub timestamp: u64,
+}
+
+/// Emitted when an approved clawback is executed.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ClawbackExecutedEvent {
+    pub clawback_id: u64,
+    pub stream_id: u64,
+    pub amount: i128,
+    pub sender: Address,
+    pub timestamp: u64,
+}
+// ---------------------------------------------------------------------------
 // Contract
 // ---------------------------------------------------------------------------
 #[contract]
@@ -428,6 +601,7 @@ impl StellarStreamContract {
         end_time: u64,
         curve_type: u32,
         is_soulbound: bool,
+        clawback_enabled: bool,
         milestones: Option<Vec<Milestone>>,
     ) -> Result<u64, Error> {
         sender.require_auth();
@@ -442,12 +616,9 @@ impl StellarStreamContract {
             end_time,
             curve_type,
             is_soulbound,
+            clawback_enabled,
             milestones,
         )?;
-        // Charged on top of `total_amount`, so the stream is funded in full and
-        // the sender pays `total_amount + fee`. A failure here (an unset
-        // treasury, or a sender who cannot cover the fee) reverts the whole
-        // invocation, including the stream just created.
         collect_protocol_fee(&env, &sender, &token, stream_id, total_amount)?;
         Ok(stream_id)
     }
@@ -568,6 +739,7 @@ impl StellarStreamContract {
                 proposal.start_time,
                 proposal.end_time,
                 CURVE_LINEAR,
+                false,
                 false,
                 None,
             )?;
@@ -1057,9 +1229,7 @@ impl StellarStreamContract {
         admin.require_auth();
         extend_instance_ttl(&env);
         require_admin(&env, &admin)?;
-        let mut r = get_restricted(&env);
-        r.set(target, true);
-        env.storage().instance().set(&DataKey::RestrictedAddresses, &r);
+        compliance::restrict_address(&env, &target);
         Ok(())
     }
 
@@ -1067,9 +1237,7 @@ impl StellarStreamContract {
         admin.require_auth();
         extend_instance_ttl(&env);
         require_admin(&env, &admin)?;
-        let mut r = get_restricted(&env);
-        r.remove(target);
-        env.storage().instance().set(&DataKey::RestrictedAddresses, &r);
+        compliance::unrestrict_address(&env, &target);
         Ok(())
     }
 
@@ -1278,6 +1446,59 @@ impl StellarStreamContract {
         }
         count
     }
+
+    // ===== Clawback entry points =====
+
+    /// Request the return of `amount` tokens already withdrawn from stream `stream_id`.
+    ///
+    /// The stream must have been created with `clawback_enabled = true`.
+    /// `amount` must be > 0 and ≤ `stream.withdrawn_amount`.
+    /// Only the stream's sender may call this.
+    pub fn request_clawback(
+        env: Env,
+        stream_id: u64,
+        sender: Address,
+        amount: i128,
+        reason: String,
+        required_approvals: u32,
+        expires_at: u64,
+    ) -> Result<u64, Error> {
+        sender.require_auth();
+        extend_instance_ttl(&env);
+        clawback::request_clawback(&env, stream_id, &sender, amount, reason, required_approvals, expires_at)
+    }
+
+    /// Approve a pending clawback request.
+    ///
+    /// The receiver's approval immediately satisfies the condition.
+    /// Any other address counts as a governance approver toward `required_approvals`.
+    pub fn approve_clawback(
+        env: Env,
+        clawback_id: u64,
+        approver: Address,
+    ) -> Result<(), Error> {
+        approver.require_auth();
+        extend_instance_ttl(&env);
+        clawback::approve_clawback(&env, clawback_id, &approver)
+    }
+
+    /// Execute an approved clawback, transferring tokens from receiver back to sender.
+    ///
+    /// May be called by anyone once the request is in `Approved` status.
+    pub fn execute_clawback(
+        env: Env,
+        clawback_id: u64,
+        executor: Address,
+    ) -> Result<(), Error> {
+        executor.require_auth();
+        extend_instance_ttl(&env);
+        clawback::execute_clawback(&env, clawback_id)
+    }
+
+    /// Fetch a clawback request by ID. Returns `None` if it does not exist.
+    pub fn get_clawback_request(env: Env, clawback_id: u64) -> Option<ClawbackRequest> {
+        clawback::get_clawback_request(&env, clawback_id)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1294,6 +1515,8 @@ fn withdraw_inner(env: &Env, stream_id: u64, receiver: &Address) -> Result<i128,
     if &stream.receiver != receiver {
         return Err(Error::Unauthorized);
     }
+    // OFAC compliance: block withdrawals to restricted receivers.
+    compliance::require_not_restricted(env, receiver);
 
     let withdrawable = withdrawable_amount(env, &stream);
     if withdrawable <= 0 {
@@ -1439,6 +1662,7 @@ fn create_stream_internal(
     end_time: u64,
     curve_type: u32,
     is_soulbound: bool,
+    clawback_enabled: bool,
     milestones: Option<Vec<Milestone>>,
 ) -> Result<u64, Error> {
     if is_contract_paused(env) {
@@ -1488,6 +1712,7 @@ fn create_stream_internal(
         paused_duration: 0,
         last_paused_at: 0,
         milestones,
+        clawback_enabled,
     };
 
     env.storage().persistent().set(&DataKey::Stream(id), &stream);
@@ -1838,14 +2063,11 @@ fn add_history(env: &Env, stream_id: u64, action: StreamAction) {
 }
 
 fn is_restricted(env: &Env, target: &Address) -> bool {
-    get_restricted(env).get(target.clone()).unwrap_or(false)
+    compliance::is_restricted(env, target)
 }
 
-fn get_restricted(env: &Env) -> Map<Address, bool> {
-    env.storage()
-        .instance()
-        .get(&DataKey::RestrictedAddresses)
-        .unwrap_or(Map::new(env))
+fn get_restricted(env: &Env) -> soroban_sdk::Map<Address, bool> {
+    compliance::load_restricted(env)
 }
 
 fn require_admin(env: &Env, account: &Address) -> Result<(), Error> {
