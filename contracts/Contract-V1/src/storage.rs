@@ -102,6 +102,8 @@ pub enum DataKey {
     // -----------------------------------------------------------------------
     /// Re-entrancy mutex (true while a protected call is executing).
     ReentrancyLock,
+    /// Active flash loan tracking (token address being borrowed).
+    ActiveFlashLoan(Address),
 }
 
 // ---------------------------------------------------------------------------

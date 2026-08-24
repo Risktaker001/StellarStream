@@ -96,6 +96,7 @@
 //!
 //! See `contracts/Contract-V1/README.md` for the full specification.
 
+pub mod flash_loan;
 pub mod math;
 pub mod storage;
 pub mod clawback;
@@ -110,7 +111,7 @@ mod compliance_test;
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, Address,
-    Env, Map, String, Vec,
+    Env, Map, String, Vec, Bytes,
 };
 use storage::{
     bump_persistent_ttl_if_present, extend_history_ttl, extend_instance_ttl, extend_metadata_ttl,
@@ -209,6 +210,13 @@ pub enum Error {
     ClawbackExpired = 48,
     /// The clawback request was rejected.
     ClawbackRejected = 49,
+    // Flash loan errors (101-110)
+    InsufficientFlashLiquidity = 101,
+    InvalidFlashBorrowAmount = 102,
+    FlashLoanInProgress = 103,
+    InsufficientFlashRepayment = 104,
+    FlashLoanCallbackFailed = 105,
+    FlashLoanFeeOverflow = 106,
 }
 
 // ---------------------------------------------------------------------------
@@ -767,6 +775,150 @@ impl StellarStreamContract {
 
         env.storage().temporary().remove(&DataKey::ReentrancyLock);
         result
+    }
+
+    /// Execute a flash loan, borrowing idle tokens for a single transaction.
+    ///
+    /// Allows a borrower to atomically:
+    /// 1. Borrow idle tokens (not allocated to active streams)
+    /// 2. Execute callback logic (received_tokens are transferred to the callback contract)
+    /// 3. Repay the loan + fee before the transaction ends
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `borrower` - Address requesting the flash loan
+    /// * `token` - Address of the token to borrow
+    /// * `amount` - Amount to borrow (must be non-negative and available)
+    /// * `callback_contract` - Address of the contract to call back
+    /// * `callback_data` - Arbitrary data passed to the callback
+    ///
+    /// # Returns
+    /// `Result<(), Error>` - Success if loan was executed and repaid, error otherwise
+    ///
+    /// # Errors
+    /// - `InsufficientFlashLiquidity` - Not enough idle tokens available
+    /// - `InvalidFlashBorrowAmount` - Amount is invalid (zero or negative)
+    /// - `FlashLoanInProgress` - Flash loan already executing (re-entrancy)
+    /// - `InsufficientFlashRepayment` - Callback didn't repay principal + fee
+    /// - `FlashLoanCallbackFailed` - Callback execution failed
+    /// - `FlashLoanFeeOverflow` - Fee calculation overflowed
+    ///
+    /// # Implementation Details
+    /// - Re-entrancy protected: only one flash loan can execute per transaction
+    /// - Fee is calculated as: `amount * 50 bps / 10_000` (0.5% default)
+    /// - Borrows only from idle tokens (total TVL is already reserved for streams)
+    /// - Transfers tokens to callback contract, which must transfer back `amount + fee`
+    pub fn flash_loan(
+        env: Env,
+        borrower: Address,
+        token: Address,
+        amount: i128,
+        callback_contract: Address,
+        callback_data: Bytes,
+    ) -> Result<(), Error> {
+        borrower.require_auth();
+        extend_instance_ttl(&env);
+
+        // Check for re-entrancy: only one flash loan per transaction
+        if env.storage()
+            .temporary()
+            .get::<_, bool>(&DataKey::ActiveFlashLoan(token.clone()))
+            .unwrap_or(false)
+        {
+            return Err(Error::FlashLoanInProgress);
+        }
+
+        // Validate borrow amount is positive
+        if amount <= 0 {
+            return Err(Error::InvalidFlashBorrowAmount);
+        }
+
+        // Calculate idle liquidity: total contract balance - TVL
+        let tvl: i128 = get_tvl(&env)
+            .get(token.clone())
+            .unwrap_or(0);
+
+        // Get token contract client to check balance
+        let token_client = TokenClient::new(&env, &token);
+        let contract_balance = token_client.balance(&env.current_contract_address());
+
+        // Idle liquidity is balance minus allocated (TVL)
+        let idle_liquidity = contract_balance - tvl;
+        if idle_liquidity < amount {
+            return Err(Error::InsufficientFlashLiquidity);
+        }
+
+        // Calculate fee (0.5% default = 50 bps)
+        let fee = flash_loan::calculate_flash_loan_fee(amount, 50)
+            .map_err(|_| Error::FlashLoanFeeOverflow)?;
+
+        // Set re-entrancy lock for this token
+        env.storage()
+            .temporary()
+            .set(&DataKey::ActiveFlashLoan(token.clone()), &true);
+
+        // Transfer tokens to callback contract
+        token_client.transfer(&env.current_contract_address(), &callback_contract, &amount);
+
+        // Emit flash loan event
+        env.events().publish(
+            (symbol_short!("fl_exec"), borrower.clone()),
+            flash_loan::FlashLoanEvent {
+                borrower: borrower.clone(),
+                token: token.clone(),
+                amount,
+                fee,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
+        // Call the callback contract's execute_flash_loan function
+        let callback_result = env.invoke_contract::<Result<(), String>>(
+            &callback_contract,
+            &symbol_short!("fl_exec"),
+            (&token, &amount, &fee, &callback_data),
+        );
+
+        if let Err(_) = callback_result {
+            env.storage()
+                .temporary()
+                .remove(&DataKey::ActiveFlashLoan(token));
+            return Err(Error::FlashLoanCallbackFailed);
+        }
+
+        // Verify repayment: contract must have received at least amount + fee
+        let final_balance = token_client.balance(&env.current_contract_address());
+        let repaid = final_balance - contract_balance;
+
+        if repaid < amount + fee {
+            env.storage()
+                .temporary()
+                .remove(&DataKey::ActiveFlashLoan(token));
+            return Err(Error::InsufficientFlashRepayment);
+        }
+
+        // Update TVL with fee (fee goes to protocol, increases available balance)
+        // The TVL remains unchanged since we're only borrowing idle tokens
+        // Fee is just extra tokens returned beyond the principal
+
+        // Emit repayment event
+        env.events().publish(
+            (symbol_short!("fl_repay"), borrower),
+            flash_loan::FlashLoanRepaymentEvent {
+                borrower,
+                token: token.clone(),
+                amount,
+                fee,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
+        // Clear re-entrancy lock
+        env.storage()
+            .temporary()
+            .remove(&DataKey::ActiveFlashLoan(token));
+
+        Ok(())
     }
 
     /// Cancel a stream. Only the sender may cancel; refunds are implicit because
@@ -1997,4 +2149,9 @@ mod security_test;
 
 #[cfg(test)]
 mod metrics_test;
+
+#[cfg(test)]
 mod fee_test;
+
+#[cfg(test)]
+mod flash_loan_test;
