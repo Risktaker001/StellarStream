@@ -102,6 +102,10 @@ pub enum DataKey {
     ClawbackCounter,
 
     // -----------------------------------------------------------------------
+    // Persistent storage: recurring stream records (long-term, TTL-extended on access).
+    // -----------------------------------------------------------------------
+    /// Maps a parent recurring stream to its current child stream id.
+    RecurringChildStreamId(u64),
     // Persistent storage: dispute records (long-term, TTL-extended on access).
     // -----------------------------------------------------------------------
     /// A dispute record by id.
