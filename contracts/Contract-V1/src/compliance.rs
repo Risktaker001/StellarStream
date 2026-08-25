@@ -23,10 +23,7 @@
 
 use soroban_sdk::{symbol_short, Address, Env, Map};
 
-use crate::{
-    storage::DataKey,
-    Error,
-};
+use crate::{storage::DataKey, Error};
 
 // ---------------------------------------------------------------------------
 // Internal helpers
