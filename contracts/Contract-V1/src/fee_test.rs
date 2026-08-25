@@ -44,6 +44,7 @@ impl FeeFixture {
             &1_000u64,
             &CURVE_LINEAR,
             &false,
+            &false,
             &None,
         )
     }
@@ -243,9 +244,13 @@ fn test_insufficient_balance_for_fee_reverts_creation() {
         &1_000u64,
         &CURVE_LINEAR,
         &false,
+        &false,
         &None,
     );
-    assert!(result.is_err(), "creation must fail when the fee cannot be paid");
+    assert!(
+        result.is_err(),
+        "creation must fail when the fee cannot be paid"
+    );
 
     // Nothing was committed: no id consumed, no tokens moved.
     assert_eq!(c.next_stream_id(), next_id_before);
@@ -290,6 +295,7 @@ fn test_fee_without_treasury_is_rejected() {
             &0u64,
             &1_000u64,
             &CURVE_LINEAR,
+            &false,
             &false,
             &None,
         ),

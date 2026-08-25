@@ -33,6 +33,7 @@ fn test_create_and_get_stream() {
         &1_000u64,
         &CURVE_LINEAR,
         &false,
+        &false,
         &None,
     );
     let s = c.get_stream(&id);
@@ -44,7 +45,7 @@ fn test_create_and_get_stream() {
 fn test_get_time_remaining_and_percentage() {
     let f = setup();
     let c = client(&f.env, &f.contract);
-    
+
     // Set current ledger time
     f.env.ledger().with_mut(|li| {
         li.timestamp = 100;
@@ -55,9 +56,10 @@ fn test_get_time_remaining_and_percentage() {
         &f.receiver,
         &f.token,
         &1_000_000i128,
-        &100u64, // start time
+        &100u64,  // start time
         &1100u64, // end time (1000s duration)
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -419,6 +421,7 @@ fn test_milestone_simple_schedule() {
         &365u64,
         &CURVE_MILESTONE,
         &false,
+        &false,
         &Some(schedule),
     );
 
@@ -440,6 +443,7 @@ fn test_milestone_before_first_returns_zero() {
         &0u64,
         &365u64,
         &CURVE_MILESTONE,
+        &false,
         &false,
         &Some(schedule),
     );
@@ -464,6 +468,7 @@ fn test_milestone_at_milestone_returns_cumulative_percentage() {
         &0u64,
         &365u64,
         &CURVE_MILESTONE,
+        &false,
         &false,
         &Some(schedule),
     );
@@ -492,6 +497,7 @@ fn test_milestone_between_milestones_holds_previous_percentage() {
         &365u64,
         &CURVE_MILESTONE,
         &false,
+        &false,
         &Some(schedule),
     );
 
@@ -517,6 +523,7 @@ fn test_milestone_after_last_returns_total() {
         &0u64,
         &365u64,
         &CURVE_MILESTONE,
+        &false,
         &false,
         &Some(schedule),
     );
@@ -546,6 +553,7 @@ fn test_milestone_invalid_order_rejected() {
             &365u64,
             &CURVE_MILESTONE,
             &false,
+            &false,
             &Some(bad_schedule),
         ),
         Err(Ok(Error::InvalidMilestones))
@@ -569,6 +577,7 @@ fn test_milestone_invalid_percentages_rejected() {
             &365u64,
             &CURVE_MILESTONE,
             &false,
+            &false,
             &Some(non_ascending),
         ),
         Err(Ok(Error::InvalidMilestonePercentages))
@@ -585,6 +594,7 @@ fn test_milestone_invalid_percentages_rejected() {
             &0u64,
             &365u64,
             &CURVE_MILESTONE,
+            &false,
             &false,
             &Some(incomplete),
         ),
@@ -605,6 +615,7 @@ fn test_milestone_withdrawal() {
         &0u64,
         &365u64,
         &CURVE_MILESTONE,
+        &false,
         &false,
         &Some(schedule),
     );
@@ -640,6 +651,7 @@ fn test_milestone_cancellation() {
         &365u64,
         &CURVE_MILESTONE,
         &false,
+        &false,
         &Some(schedule),
     );
 
@@ -674,6 +686,7 @@ fn test_milestone_vs_linear_comparison() {
         &365u64,
         &CURVE_MILESTONE,
         &false,
+        &false,
         &Some(schedule),
     );
     let linear_id = c.create_stream(
@@ -684,6 +697,7 @@ fn test_milestone_vs_linear_comparison() {
         &0u64,
         &365u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -717,6 +731,7 @@ fn test_milestone_curve_requires_schedule() {
             &365u64,
             &CURVE_MILESTONE,
             &false,
+            &false,
             &None,
         ),
         Err(Ok(Error::InvalidMilestones))
@@ -738,6 +753,7 @@ fn test_non_milestone_curve_rejects_schedule() {
             &0u64,
             &365u64,
             &CURVE_LINEAR,
+            &false,
             &false,
             &Some(schedule),
         ),
@@ -761,6 +777,7 @@ fn test_milestone_end_time_before_last_milestone_rejected() {
             &0u64,
             &200u64,
             &CURVE_MILESTONE,
+            &false,
             &false,
             &Some(schedule),
         ),
@@ -786,6 +803,7 @@ fn test_get_active_streams_count() {
         &1_000u64,
         &CURVE_LINEAR,
         &false,
+        &false,
         &None,
     );
 
@@ -799,6 +817,7 @@ fn test_get_active_streams_count() {
         &0u64,
         &1_000u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -828,6 +847,7 @@ fn test_get_user_active_streams_count() {
         &1_000u64,
         &CURVE_LINEAR,
         &false,
+        &false,
         &None,
     );
 
@@ -842,6 +862,7 @@ fn test_get_user_active_streams_count() {
         &0u64,
         &1_000u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -866,6 +887,7 @@ fn test_get_total_streams_count() {
         &1_000u64,
         &CURVE_LINEAR,
         &false,
+        &false,
         &None,
     );
 
@@ -879,6 +901,7 @@ fn test_get_total_streams_count() {
         &0u64,
         &1_000u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -902,6 +925,7 @@ fn test_get_user_total_streams_count() {
         &1_000u64,
         &CURVE_LINEAR,
         &false,
+        &false,
         &None,
     );
 
@@ -916,6 +940,7 @@ fn test_get_user_total_streams_count() {
         &0u64,
         &1_000u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -939,6 +964,7 @@ fn test_get_paused_streams_count() {
         &0u64,
         &1_000u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -967,6 +993,7 @@ fn test_get_user_paused_streams_count() {
         &0u64,
         &1_000u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -999,6 +1026,7 @@ fn test_get_closed_streams_count() {
         &1_000u64,
         &CURVE_LINEAR,
         &false,
+        &false,
         &None,
     );
 
@@ -1023,6 +1051,7 @@ fn test_get_user_closed_streams_count() {
         &0u64,
         &1_000u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -1051,6 +1080,7 @@ fn test_stream_history_created() {
         &1_000u64,
         &CURVE_LINEAR,
         &false,
+        &false,
         &None,
     );
 
@@ -1072,6 +1102,7 @@ fn test_stream_history_pause_resume() {
         &0u64,
         &1_000u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -1099,6 +1130,7 @@ fn test_stream_history_cancel() {
         &0u64,
         &1_000u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -1128,6 +1160,7 @@ fn test_stream_history_withdraw() {
         &100u64,
         &1_100u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -1164,6 +1197,7 @@ fn test_stream_history_ordered_by_timestamp() {
         &100u64,
         &1_100u64,
         &CURVE_LINEAR,
+        &false,
         &false,
         &None,
     );
@@ -1203,4 +1237,813 @@ fn test_stream_history_nonexistent_stream() {
 
     let history = c.get_stream_history(&999);
     assert_eq!(history.len(), 0);
+}
+// ---------------------------------------------------------------------------
+// Issue #1445 — calculate_unlocked_exponential (exponential / quadratic vesting)
+// ---------------------------------------------------------------------------
+
+use crate::math::calculate_unlocked_exponential;
+use crate::math::calculate_unlocked;
+
+/// Before the stream starts nothing is unlocked.
+#[test]
+fn test_exponential_before_start_is_zero() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 100, 200, 0, 0), 0);
+    assert_eq!(calculate_unlocked_exponential(10_000, 100, 200, 99, 0), 0);
+    assert_eq!(calculate_unlocked_exponential(10_000, 100, 200, 100, 0), 0);
+}
+
+/// Exactly at the start time nothing is unlocked.
+#[test]
+fn test_exponential_at_start_is_zero() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 0, 0), 0);
+}
+
+/// At or after the end time everything is unlocked.
+#[test]
+fn test_exponential_after_end_is_full() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 100, 0), 10_000);
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 100_000, 0), 10_000);
+    assert_eq!(calculate_unlocked_exponential(10_000, 50, 100, 150, 500), 10_000);
+}
+
+/// Early stage unlocks slowly: at 10% time only 1% is unlocked.
+#[test]
+fn test_exponential_early_stage_slow_unlock() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 10, 0), 100);
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 25, 0), 625);
+}
+
+/// Mid stage: at 50% time only 25% is unlocked (quadratic, not linear).
+#[test]
+fn test_exponential_mid_stage_quarter() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 50, 0), 2_500);
+}
+
+/// The checkpoint from the issue: 50% unlocked at ~70.7% of time.
+#[test]
+fn test_exponential_seventy_percent_checkpoint_half() {
+    // 70.7% of 100 seconds -> elapsed=70, 70^2/100^2 = 0.49 -> 4_900.
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 70, 0), 4_900);
+    assert!(calculate_unlocked_exponential(10_000, 0, 100, 70, 0) <= 5_000);
+    // A finer sample near the true 50% checkpoint: duration 10_000, t=7_071.
+    let half = calculate_unlocked_exponential(10_000_000, 0, 10_000, 7_071, 0);
+    assert_eq!(half, 4_999_904);
+}
+
+/// Late stage unlocks fast: at 90% time 81% is unlocked.
+#[test]
+fn test_exponential_late_stage_fast_unlock() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 90, 0), 8_100);
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 99, 0), 9_801);
+}
+
+/// Paused duration is subtracted from elapsed time.
+#[test]
+fn test_exponential_subtracts_paused_duration() {
+    // No pause: elapsed=50 -> 25%.
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 50, 0), 2_500);
+    // 10 seconds paused: effective elapsed=40 -> 16%.
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 50, 10), 1_600);
+    // Pause >= raw elapsed -> effective elapsed 0.
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 50, 50), 0);
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 50, 500), 0);
+}
+
+/// Large amounts with a small elapsed time stay inside i128 and unlock a
+/// positive, bounded result (never a wrap or panic).
+#[test]
+fn test_exponential_large_amounts_no_overflow() {
+    // Maximal-strength amount. With elapsed=1 the squared product is exactly
+    // `amount * 1`, which fits, and the result is `amount / duration²`.
+    let big = i128::MAX;
+    let out = calculate_unlocked_exponential(big, 0, 1_000, 1, 0);
+    assert!(out > 0);
+    assert!(out <= big);
+    assert_eq!(out, big / 1_000_000);
+
+    // A large realistic amount over a one-year duration reaches ~1/4 at 50%.
+    let yearly = 100_000_000_000_000_000_i128; // 1e17
+    let start = 1_700_000_000u64;
+    let dur = 31_536_000u64; // 1 year in seconds
+    let at_half = calculate_unlocked_exponential(yearly, start, start + dur, start + dur / 2, 0);
+    assert!(at_half > 0);
+    assert!(at_half <= yearly);
+    // elapsed == duration/2 exactly -> unlocked == yearly / 4, exactly.
+    assert_eq!(at_half, 25_000_000_000_000_000);
+}
+
+/// Force overflow of the intermediate product -> guarded to 0 (safe).
+#[test]
+fn test_exponential_overflow_prevention() {
+    assert_eq!(
+        calculate_unlocked_exponential(i128::MAX, 0, u64::MAX, u64::MAX - 1, 0),
+        0
+    );
+}
+
+/// Result is always <= total_amount across the whole curve.
+#[test]
+fn test_exponential_always_within_total() {
+    let total = 1_000_000_000_i128;
+    let start = 0u64;
+    let end = 1_000u64;
+    for t in 0..=1_000u64 {
+        for p in [0u64, 10, 200, 400] {
+            let v = calculate_unlocked_exponential(total, start, end, t, p);
+            assert!(v >= 0, "negative at t={t}");
+            assert!(v <= total, "exceeded total at t={t}");
+        }
+    }
+}
+
+/// Curve comparison with the linear curve.
+#[test]
+fn test_exponential_early_less_than_linear_less_than_late() {
+    let total = 10_000_i128;
+    let start = 0u64;
+    let end = 100u64;
+
+    // Early: exponential (900) is below linear (3_000).
+    let exp_early = calculate_unlocked_exponential(total, start, end, 30, 0);
+    let lin_early = calculate_unlocked(total, start, start, end, 30);
+    assert!(exp_early < lin_early, "exp early {exp_early} < linear {lin_early}");
+    assert_eq!(exp_early, 900);
+    assert_eq!(lin_early, 3_000);
+
+    // Mid (50%): linear 5_000, quadratic 2_500.
+    assert_eq!(calculate_unlocked_exponential(total, start, end, 50, 0), 2_500);
+    assert_eq!(calculate_unlocked(total, start, start, end, 50), 5_000);
+
+    // Late (90%): still below linear until full duration.
+    let exp_late = calculate_unlocked_exponential(total, start, end, 90, 0);
+    let lin_late = calculate_unlocked(total, start, start, end, 90);
+    assert!(exp_late < lin_late, "late exp {exp_late} vs linear {lin_late}");
+    assert!(exp_late < total);
+
+    // Final full unlock matches linear at 100%.
+    assert_eq!(
+        calculate_unlocked_exponential(total, start, end, 100, 0),
+        calculate_unlocked(total, start, start, end, 100),
+    );
+}
+
+/// Exponential is monotonic non-decreasing.
+#[test]
+fn test_exponential_monotonic() {
+    let mut prev = -1i128;
+    for t in 0..=100u64 {
+        let v = calculate_unlocked_exponential(10_000, 0, 100, t, 0);
+        assert!(v >= prev, "decreased at t={t}: {prev} -> {v}");
+        prev = v;
+    }
+    assert_eq!(prev, 10_000);
+
+// ---------------------------------------------------------------------------
+// Advanced query tests (issue #XXXX)
+// ---------------------------------------------------------------------------
+
+/// Helper to create a stream with specific parameters for testing.
+fn create_test_stream(
+    c: &StellarStreamContractClient,
+    sender: &Address,
+    receiver: &Address,
+    token: &Address,
+    amount: i128,
+    start_time: u64,
+    end_time: u64,
+    state: u32,
+) -> u64 {
+    let id = c.create_stream(
+        sender,
+        receiver,
+        token,
+        &amount,
+        &start_time,
+        &end_time,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // If state is not ACTIVE, pause or close the stream as needed
+    if state == STATE_PAUSED {
+        c.pause_stream(&id, sender);
+    } else if state == STATE_CLOSED {
+        c.cancel_stream(&id, sender);
+    }
+
+    id
+}
+
+#[test]
+fn test_query_streams_filter_by_token() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let token2 = f.env.register(MockToken, ());
+
+    // Create streams with different tokens
+    let id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &token2,
+        &2_000_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Query by token 1
+    let filter = StreamFilter {
+        token: Some(f.token.clone()),
+        state: None,
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().id, id1);
+
+    // Query by token 2
+    let filter = StreamFilter {
+        token: Some(token2.clone()),
+        state: None,
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().id, id2);
+}
+
+#[test]
+fn test_query_streams_filter_by_status() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    let id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &2_000_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Pause one stream
+    c.pause_stream(&id2, &f.sender);
+
+    // Query active streams
+    let filter = StreamFilter {
+        token: None,
+        state: Some(STATE_ACTIVE),
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().state, STATE_ACTIVE);
+
+    // Query paused streams
+    let filter = StreamFilter {
+        token: None,
+        state: Some(STATE_PAUSED),
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().state, STATE_PAUSED);
+}
+
+#[test]
+fn test_query_streams_filter_by_amount_range() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create streams with different amounts
+    let _id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &500i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &2_500i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id3 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &5_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Filter for amounts between 1000 and 4000
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: Some(1_000i128),
+        max_amount: Some(4_000i128),
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().total_amount, 2_500i128);
+}
+
+#[test]
+fn test_query_streams_filter_by_time_range() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create streams with different time ranges
+    let _id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000i128,
+        &1_000u64,
+        &2_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id3 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000i128,
+        &3_000u64,
+        &4_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Filter for streams that start at or after 500
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: None,
+        max_amount: None,
+        start_time_after: Some(500u64),
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 2);
+
+    // Filter for streams that end at or before 1500
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: Some(1_500u64),
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn test_query_streams_combined_filters() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let token2 = f.env.register(MockToken, ());
+
+    // Create diverse set of streams
+    let id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &token2,
+        &2_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id3 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &5_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Pause one stream
+    c.pause_stream(&id1, &f.sender);
+
+    // Filter by token, amount range, and status
+    let filter = StreamFilter {
+        token: Some(f.token.clone()),
+        state: Some(STATE_ACTIVE),
+        min_amount: Some(3_000i128),
+        max_amount: Some(10_000i128),
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().total_amount, 5_000i128);
+}
+
+#[test]
+fn test_query_streams_pagination_offset() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create multiple streams
+    for i in 0..5 {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * (i + 1) as i128),
+            &0u64,
+            &1_000u64,
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Query with offset=0
+    let filter = StreamFilter::default();
+    let results = c.query_streams(&filter, &0u32, &2u32);
+    assert_eq!(results.len(), 2);
+
+    // Query with offset=2
+    let results = c.query_streams(&filter, &2u32, &2u32);
+    assert_eq!(results.len(), 2);
+
+    // Query with offset=4
+    let results = c.query_streams(&filter, &4u32, &2u32);
+    assert_eq!(results.len(), 1);
+
+    // Query with offset beyond results
+    let results = c.query_streams(&filter, &10u32, &2u32);
+    assert_eq!(results.len(), 0);
+}
+
+#[test]
+fn test_query_streams_pagination_limit() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create multiple streams
+    for i in 0..10 {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * (i + 1) as i128),
+            &0u64,
+            &1_000u64,
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Query with limit=5
+    let filter = StreamFilter::default();
+    let results = c.query_streams(&filter, &0u32, &5u32);
+    assert_eq!(results.len(), 5);
+
+    // Query with limit=20 (should return all 10)
+    let results = c.query_streams(&filter, &0u32, &20u32);
+    assert_eq!(results.len(), 10);
+}
+
+#[test]
+fn test_query_streams_limit_capped_at_50() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create 60 streams
+    for i in 0..60 {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * (i + 1) as i128),
+            &0u64,
+            &1_000u64,
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Query with limit=100 (should be capped at 50)
+    let filter = StreamFilter::default();
+    let results = c.query_streams(&filter, &0u32, &100u32);
+    assert_eq!(results.len(), 50);
+}
+
+#[test]
+fn test_query_streams_empty_results() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create a stream with a specific token
+    let token2 = f.env.register(MockToken, ());
+    c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &token2,
+        &1_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Query for a different token
+    let filter = StreamFilter {
+        token: Some(f.token.clone()),
+        state: None,
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 0);
+}
+
+#[test]
+fn test_query_streams_no_filter_returns_all() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create multiple streams
+    let count = 3;
+    for i in 0..count {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * (i + 1) as i128),
+            &0u64,
+            &1_000u64,
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Query with no filters (all None)
+    let filter = StreamFilter::default();
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), count as usize);
+}
+
+#[test]
+fn test_query_streams_multiple_pages() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create 15 streams
+    for i in 0..15 {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * (i + 1) as i128),
+            &0u64,
+            &1_000u64,
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Fetch first page (limit=5)
+    let filter = StreamFilter::default();
+    let page1 = c.query_streams(&filter, &0u32, &5u32);
+    assert_eq!(page1.len(), 5);
+
+    // Fetch second page (offset=5, limit=5)
+    let page2 = c.query_streams(&filter, &5u32, &5u32);
+    assert_eq!(page2.len(), 5);
+
+    // Fetch third page (offset=10, limit=5)
+    let page3 = c.query_streams(&filter, &10u32, &5u32);
+    assert_eq!(page3.len(), 5);
+
+    // Verify all ids are different
+    let ids1: Vec<u64> = page1.iter().map(|s| s.id).collect();
+    let ids2: Vec<u64> = page2.iter().map(|s| s.id).collect();
+    let ids3: Vec<u64> = page3.iter().map(|s| s.id).collect();
+
+    for id in ids2.iter() {
+        assert!(!ids1.contains(id));
+    }
+    for id in ids3.iter() {
+        assert!(!ids1.contains(id));
+        assert!(!ids2.contains(id));
+    }
+}
+
+#[test]
+fn test_query_streams_edge_case_exact_boundaries() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create streams with exact boundary values
+    let id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &5_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let id3 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &10_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Query for exact min_amount (should include id1)
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: Some(1_000i128),
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 3);
+
+    // Query for exact max_amount (should include id3)
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: None,
+        max_amount: Some(10_000i128),
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 3);
+
+    // Query for range excluding middle values
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: Some(1_000i128),
+        max_amount: Some(1_000i128),
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().id, id1);
+}
+
+#[test]
+fn test_query_streams_large_dataset_performance() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create 100 streams
+    for i in 0..100 {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * ((i % 10 + 1) as i128)),
+            &(i as u64 * 100),
+            &((i as u64 + 1) * 100),
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Query should still work efficiently even with large dataset
+    let filter = StreamFilter::default();
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 50);
+
+    // Test pagination through all results
+    for offset in (0..100).step_by(25) {
+        let results = c.query_streams(&filter, &(offset as u32), &25u32);
+        assert!(results.len() <= 25 && results.len() > 0);
+    }
 }
