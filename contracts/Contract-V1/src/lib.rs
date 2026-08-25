@@ -96,6 +96,7 @@
 //!
 //! See `contracts/Contract-V1/README.md` for the full specification.
 
+pub mod errors;
 pub mod flash_loan;
 pub mod math;
 pub mod storage;
@@ -150,74 +151,8 @@ pub const ROLE_ADMIN: u32 = 0;
 pub const ROLE_PAUSER: u32 = 1;
 pub const ROLE_TREASURY: u32 = 2;
 
-// ---------------------------------------------------------------------------
-// Error definitions
-// ---------------------------------------------------------------------------
-#[contracterror]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u32)]
-pub enum Error {
-    AlreadyInitialized = 1,
-    InvalidTimeRange = 2,
-    InvalidAmount = 3,
-    StreamNotFound = 4,
-    Unauthorized = 5,
-    AlreadyCancelled = 6,
-    InsufficientBalance = 7,
-    AlreadyPaused = 8,
-    NotPaused = 9,
-    ContractPaused = 10,
-    Reentrancy = 11,
-    NotAdmin = 12,
-    NotPauser = 13,
-    StreamPaused = 14,
-    WithdrawTooLarge = 15,
-    InvalidCurve = 16,
-    InvalidRole = 17,
-    StreamIsSoulbound = 21,
-    AddressRestricted = 22,
-    StreamNotPaused = 26,
-    Overflow = 27,
-    ProposalNotFound = 28,
-    ProposalExpired = 29,
-    AlreadyApproved = 30,
-    ProposalAlreadyExecuted = 31,
-    InvalidApprovalThreshold = 32,
-    BatchSizeExceeded = 33,
-    StreamEnded = 34,
-    MetadataLabelTooLong = 35,
-    TooManyTags = 36,
-    TagTooLong = 37,
-    FeeTooHigh = 38,
-    TreasuryNotSet = 39,
-    InvalidMilestones = 40,
-    InvalidMilestonePercentages = 41,
-
-    // ===== Clawback errors =====
-    /// No clawback request exists for the given ID.
-    ClawbackNotFound = 42,
-    /// The stream was not created with clawback enabled.
-    ClawbackNotEnabled = 43,
-    /// The requested clawback amount exceeds the amount already withdrawn.
-    ClawbackExceedsWithdrawn = 44,
-    /// The clawback request has already been executed.
-    ClawbackAlreadyExecuted = 45,
-    /// The clawback request has not yet received sufficient approvals.
-    ClawbackInsufficientApprovals = 46,
-    /// The approver has already approved this clawback request.
-    ClawbackAlreadyApproved = 47,
-    /// The clawback request has expired and can no longer be approved or executed.
-    ClawbackExpired = 48,
-    /// The clawback request was rejected.
-    ClawbackRejected = 49,
-    // Flash loan errors (101-110)
-    InsufficientFlashLiquidity = 101,
-    InvalidFlashBorrowAmount = 102,
-    FlashLoanInProgress = 103,
-    InsufficientFlashRepayment = 104,
-    FlashLoanCallbackFailed = 105,
-    FlashLoanFeeOverflow = 106,
-}
+// Re-export the error enum from the errors module.
+pub use errors::Error;
 
 // ---------------------------------------------------------------------------
 // Data structures
