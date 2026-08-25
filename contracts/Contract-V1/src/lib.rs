@@ -415,74 +415,49 @@ pub struct StreamEvent {
     pub timestamp: u64,
 }
 
+/// Advanced filter for querying streams by various criteria.
+///
+/// Filters use AND logic: a stream matches only if it passes all specified criteria.
+/// Unspecified fields (None) are ignored, allowing partial filtering.
+///
+/// # Examples
+/// - Filter by token: `StreamFilter { token: Some(token_addr), ..Default::default() }`
+/// - Filter by status and time: `StreamFilter { state: Some(STATE_ACTIVE), start_time_after: Some(t1), ..Default::default() }`
+/// - Filter by amount range: `StreamFilter { min_amount: Some(1000), max_amount: Some(5000), ..Default::default() }`
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamFilter {
+    /// Filter by token address. If Some, only return streams using this token.
+    pub token: Option<Address>,
+    /// Filter by stream state (e.g., STATE_ACTIVE, STATE_PAUSED, STATE_CLOSED).
+    pub state: Option<u32>,
+    /// Filter by minimum total_amount (inclusive). If Some, only return streams with total_amount >= min_amount.
+    pub min_amount: Option<i128>,
+    /// Filter by maximum total_amount (inclusive). If Some, only return streams with total_amount <= max_amount.
+    pub max_amount: Option<i128>,
+    /// Filter by start_time: only return streams with start_time >= start_time_after.
+    pub start_time_after: Option<u64>,
+    /// Filter by end_time: only return streams with end_time <= end_time_before.
+    pub end_time_before: Option<u64>,
+}
+
+impl Default for StreamFilter {
+    fn default() -> Self {
+        StreamFilter {
+            token: None,
+            state: None,
+            min_amount: None,
+            max_amount: None,
+            start_time_after: None,
+            end_time_before: None,
+        }
+    }
+}
+
 // Minimal token interface used by `withdraw`.
 #[contractclient(name = "TokenClient")]
 pub trait Token {
     fn transfer(env: Env, from: Address, to: Address, amount: i128);
-}
-
-// ---------------------------------------------------------------------------
-// Clawback types
-// ---------------------------------------------------------------------------
-
-/// Lifecycle state of a clawback request.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ClawbackStatus {
-    Pending,
-    Approved,
-    Executed,
-    Rejected,
-}
-
-/// A clawback request allowing a stream sender to recover previously withdrawn tokens.
-///
-/// Opt-in: the stream must have been created with `clawback_enabled = true`.
-/// Amount cannot exceed `stream.withdrawn_amount`.
-#[contracttype]
-#[derive(Clone)]
-pub struct ClawbackRequest {
-    pub clawback_id: u64,
-    pub stream_id: u64,
-    pub amount: i128,
-    pub reason: String,
-    pub approved_by_receiver: bool,
-    pub approvals: Vec<Address>,
-    pub required_approvals: u32,
-    pub status: ClawbackStatus,
-    pub created_at: u64,
-    pub expires_at: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct ClawbackRequestedEvent {
-    pub clawback_id: u64,
-    pub stream_id: u64,
-    pub sender: Address,
-    pub amount: i128,
-    pub reason: String,
-    pub timestamp: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct ClawbackApprovedEvent {
-    pub clawback_id: u64,
-    pub approver: Address,
-    pub by_receiver: bool,
-    pub approval_count: u32,
-    pub timestamp: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct ClawbackExecutedEvent {
-    pub clawback_id: u64,
-    pub stream_id: u64,
-    pub amount: i128,
-    pub sender: Address,
-    pub timestamp: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -1445,6 +1420,124 @@ impl StellarStreamContract {
             }
         }
         count
+    }
+
+    // ===== Advanced Query =====
+
+    /// Query streams with advanced filtering and pagination support.
+    ///
+    /// # Arguments
+    /// - `filter`: A [`StreamFilter`] struct specifying criteria for matching streams.
+    ///   All filter fields use AND logic; if a field is None, that filter is skipped.
+    /// - `offset`: Number of matching streams to skip (0-indexed pagination).
+    /// - `limit`: Maximum number of matching streams to return.
+    ///   Capped at 50 to prevent unbounded gas usage.
+    ///
+    /// # Returns
+    /// A vector of [`Stream`] objects matching all specified criteria,
+    /// paginated according to `offset` and `limit`.
+    ///
+    /// # Filter Criteria
+    /// - `token`: Only return streams using this token address.
+    /// - `state`: Only return streams in this state (e.g., STATE_ACTIVE, STATE_PAUSED, STATE_CLOSED).
+    /// - `min_amount` / `max_amount`: Only return streams with total_amount in this range (inclusive).
+    /// - `start_time_after`: Only return streams with start_time >= this value.
+    /// - `end_time_before`: Only return streams with end_time <= this value.
+    ///
+    /// # Examples
+    /// ```ignore
+    /// // Get first 10 active streams
+    /// let filter = StreamFilter { state: Some(STATE_ACTIVE), ..Default::default() };
+    /// let streams = StellarStreamContract::query_streams(env, filter, 0, 10);
+    ///
+    /// // Get streams for a specific token in amount range [1000, 5000]
+    /// let filter = StreamFilter {
+    ///     token: Some(token_addr),
+    ///     min_amount: Some(1000),
+    ///     max_amount: Some(5000),
+    ///     ..Default::default()
+    /// };
+    /// let streams = StellarStreamContract::query_streams(env, filter, 0, 20);
+    /// ```
+    ///
+    /// # Gas Efficiency
+    /// - Limit is capped at 50 results to prevent gas exhaustion.
+    /// - All filters are applied in-memory; no storage iteration beyond
+    ///   the initial stream enumeration.
+    /// - For dashboards expecting larger result sets, use pagination
+    ///   with multiple calls.
+    pub fn query_streams(
+        env: Env,
+        filter: StreamFilter,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<Stream> {
+        // Cap the limit to prevent unbounded gas usage
+        let capped_limit = if limit > 50 { 50 } else { limit };
+
+        // Get all streams
+        let all_streams = get_streams(&env);
+
+        let mut matching_streams: Vec<Stream> = Vec::new(&env);
+
+        // Filter and collect matching streams
+        for (_, stream) in all_streams.iter() {
+            // Apply all filter criteria (AND logic)
+            if let Some(ref token_filter) = filter.token {
+                if stream.token != *token_filter {
+                    continue;
+                }
+            }
+
+            if let Some(state_filter) = filter.state {
+                if stream.state != state_filter {
+                    continue;
+                }
+            }
+
+            if let Some(min_amt) = filter.min_amount {
+                if stream.total_amount < min_amt {
+                    continue;
+                }
+            }
+
+            if let Some(max_amt) = filter.max_amount {
+                if stream.total_amount > max_amt {
+                    continue;
+                }
+            }
+
+            if let Some(start_after) = filter.start_time_after {
+                if stream.start_time < start_after {
+                    continue;
+                }
+            }
+
+            if let Some(end_before) = filter.end_time_before {
+                if stream.end_time > end_before {
+                    continue;
+                }
+            }
+
+            // All filters passed; add to results
+            matching_streams.push_back(stream);
+        }
+
+        // Apply pagination (offset + limit)
+        let mut result: Vec<Stream> = Vec::new(&env);
+
+        for i in 0..capped_limit {
+            let idx = offset + i;
+            if idx < matching_streams.len() as u32 {
+                if let Some(s) = matching_streams.get(idx) {
+                    result.push_back(s);
+                }
+            } else {
+                break;
+            }
+        }
+
+        result
     }
 
     // ===== Clawback entry points =====
