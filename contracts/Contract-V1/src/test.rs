@@ -1398,4 +1398,652 @@ fn test_exponential_monotonic() {
         prev = v;
     }
     assert_eq!(prev, 10_000);
+
+// ---------------------------------------------------------------------------
+// Advanced query tests (issue #XXXX)
+// ---------------------------------------------------------------------------
+
+/// Helper to create a stream with specific parameters for testing.
+fn create_test_stream(
+    c: &StellarStreamContractClient,
+    sender: &Address,
+    receiver: &Address,
+    token: &Address,
+    amount: i128,
+    start_time: u64,
+    end_time: u64,
+    state: u32,
+) -> u64 {
+    let id = c.create_stream(
+        sender,
+        receiver,
+        token,
+        &amount,
+        &start_time,
+        &end_time,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // If state is not ACTIVE, pause or close the stream as needed
+    if state == STATE_PAUSED {
+        c.pause_stream(&id, sender);
+    } else if state == STATE_CLOSED {
+        c.cancel_stream(&id, sender);
+    }
+
+    id
+}
+
+#[test]
+fn test_query_streams_filter_by_token() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let token2 = f.env.register(MockToken, ());
+
+    // Create streams with different tokens
+    let id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &token2,
+        &2_000_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Query by token 1
+    let filter = StreamFilter {
+        token: Some(f.token.clone()),
+        state: None,
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().id, id1);
+
+    // Query by token 2
+    let filter = StreamFilter {
+        token: Some(token2.clone()),
+        state: None,
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().id, id2);
+}
+
+#[test]
+fn test_query_streams_filter_by_status() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    let id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &2_000_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Pause one stream
+    c.pause_stream(&id2, &f.sender);
+
+    // Query active streams
+    let filter = StreamFilter {
+        token: None,
+        state: Some(STATE_ACTIVE),
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().state, STATE_ACTIVE);
+
+    // Query paused streams
+    let filter = StreamFilter {
+        token: None,
+        state: Some(STATE_PAUSED),
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().state, STATE_PAUSED);
+}
+
+#[test]
+fn test_query_streams_filter_by_amount_range() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create streams with different amounts
+    let _id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &500i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &2_500i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id3 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &5_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Filter for amounts between 1000 and 4000
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: Some(1_000i128),
+        max_amount: Some(4_000i128),
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().total_amount, 2_500i128);
+}
+
+#[test]
+fn test_query_streams_filter_by_time_range() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create streams with different time ranges
+    let _id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000i128,
+        &1_000u64,
+        &2_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id3 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000i128,
+        &3_000u64,
+        &4_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Filter for streams that start at or after 500
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: None,
+        max_amount: None,
+        start_time_after: Some(500u64),
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 2);
+
+    // Filter for streams that end at or before 1500
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: Some(1_500u64),
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn test_query_streams_combined_filters() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let token2 = f.env.register(MockToken, ());
+
+    // Create diverse set of streams
+    let id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &token2,
+        &2_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let _id3 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &5_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Pause one stream
+    c.pause_stream(&id1, &f.sender);
+
+    // Filter by token, amount range, and status
+    let filter = StreamFilter {
+        token: Some(f.token.clone()),
+        state: Some(STATE_ACTIVE),
+        min_amount: Some(3_000i128),
+        max_amount: Some(10_000i128),
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().total_amount, 5_000i128);
+}
+
+#[test]
+fn test_query_streams_pagination_offset() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create multiple streams
+    for i in 0..5 {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * (i + 1) as i128),
+            &0u64,
+            &1_000u64,
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Query with offset=0
+    let filter = StreamFilter::default();
+    let results = c.query_streams(&filter, &0u32, &2u32);
+    assert_eq!(results.len(), 2);
+
+    // Query with offset=2
+    let results = c.query_streams(&filter, &2u32, &2u32);
+    assert_eq!(results.len(), 2);
+
+    // Query with offset=4
+    let results = c.query_streams(&filter, &4u32, &2u32);
+    assert_eq!(results.len(), 1);
+
+    // Query with offset beyond results
+    let results = c.query_streams(&filter, &10u32, &2u32);
+    assert_eq!(results.len(), 0);
+}
+
+#[test]
+fn test_query_streams_pagination_limit() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create multiple streams
+    for i in 0..10 {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * (i + 1) as i128),
+            &0u64,
+            &1_000u64,
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Query with limit=5
+    let filter = StreamFilter::default();
+    let results = c.query_streams(&filter, &0u32, &5u32);
+    assert_eq!(results.len(), 5);
+
+    // Query with limit=20 (should return all 10)
+    let results = c.query_streams(&filter, &0u32, &20u32);
+    assert_eq!(results.len(), 10);
+}
+
+#[test]
+fn test_query_streams_limit_capped_at_50() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create 60 streams
+    for i in 0..60 {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * (i + 1) as i128),
+            &0u64,
+            &1_000u64,
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Query with limit=100 (should be capped at 50)
+    let filter = StreamFilter::default();
+    let results = c.query_streams(&filter, &0u32, &100u32);
+    assert_eq!(results.len(), 50);
+}
+
+#[test]
+fn test_query_streams_empty_results() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create a stream with a specific token
+    let token2 = f.env.register(MockToken, ());
+    c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &token2,
+        &1_000i128,
+        &0u64,
+        &1_000u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Query for a different token
+    let filter = StreamFilter {
+        token: Some(f.token.clone()),
+        state: None,
+        min_amount: None,
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 0);
+}
+
+#[test]
+fn test_query_streams_no_filter_returns_all() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create multiple streams
+    let count = 3;
+    for i in 0..count {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * (i + 1) as i128),
+            &0u64,
+            &1_000u64,
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Query with no filters (all None)
+    let filter = StreamFilter::default();
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), count as usize);
+}
+
+#[test]
+fn test_query_streams_multiple_pages() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create 15 streams
+    for i in 0..15 {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * (i + 1) as i128),
+            &0u64,
+            &1_000u64,
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Fetch first page (limit=5)
+    let filter = StreamFilter::default();
+    let page1 = c.query_streams(&filter, &0u32, &5u32);
+    assert_eq!(page1.len(), 5);
+
+    // Fetch second page (offset=5, limit=5)
+    let page2 = c.query_streams(&filter, &5u32, &5u32);
+    assert_eq!(page2.len(), 5);
+
+    // Fetch third page (offset=10, limit=5)
+    let page3 = c.query_streams(&filter, &10u32, &5u32);
+    assert_eq!(page3.len(), 5);
+
+    // Verify all ids are different
+    let ids1: Vec<u64> = page1.iter().map(|s| s.id).collect();
+    let ids2: Vec<u64> = page2.iter().map(|s| s.id).collect();
+    let ids3: Vec<u64> = page3.iter().map(|s| s.id).collect();
+
+    for id in ids2.iter() {
+        assert!(!ids1.contains(id));
+    }
+    for id in ids3.iter() {
+        assert!(!ids1.contains(id));
+        assert!(!ids2.contains(id));
+    }
+}
+
+#[test]
+fn test_query_streams_edge_case_exact_boundaries() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create streams with exact boundary values
+    let id1 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let id2 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &5_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    let id3 = c.create_stream(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &10_000i128,
+        &100u64,
+        &500u64,
+        &CURVE_LINEAR,
+        &false,
+        &None,
+    );
+
+    // Query for exact min_amount (should include id1)
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: Some(1_000i128),
+        max_amount: None,
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 3);
+
+    // Query for exact max_amount (should include id3)
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: None,
+        max_amount: Some(10_000i128),
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 3);
+
+    // Query for range excluding middle values
+    let filter = StreamFilter {
+        token: None,
+        state: None,
+        min_amount: Some(1_000i128),
+        max_amount: Some(1_000i128),
+        start_time_after: None,
+        end_time_before: None,
+    };
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().id, id1);
+}
+
+#[test]
+fn test_query_streams_large_dataset_performance() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+
+    // Create 100 streams
+    for i in 0..100 {
+        c.create_stream(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &(1_000 * ((i % 10 + 1) as i128)),
+            &(i as u64 * 100),
+            &((i as u64 + 1) * 100),
+            &CURVE_LINEAR,
+            &false,
+            &None,
+        );
+    }
+
+    // Query should still work efficiently even with large dataset
+    let filter = StreamFilter::default();
+    let results = c.query_streams(&filter, &0u32, &50u32);
+    assert_eq!(results.len(), 50);
+
+    // Test pagination through all results
+    for offset in (0..100).step_by(25) {
+        let results = c.query_streams(&filter, &(offset as u32), &25u32);
+        assert!(results.len() <= 25 && results.len() > 0);
+    }
 }
