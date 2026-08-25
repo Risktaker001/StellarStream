@@ -2206,19 +2206,13 @@ fn unlocked_amount(env: &Env, stream: &Stream) -> i128 {
                 None => return 0,
             }
         }
-        CURVE_EXP => {
-            let e = elapsed as i128;
-            let d = dur as i128;
-            // quadratic: total * elapsed^2 / dur^2
-            let num = e
-                .checked_mul(e)
-                .and_then(|v| v.checked_mul(stream.total_amount));
-            let den = d.checked_mul(d);
-            match (num, den) {
-                (Some(n), Some(den)) if den != 0 => n / den,
-                _ => 0,
-            }
-        }
+        CURVE_EXP => math::calculate_unlocked_exponential(
+            stream.total_amount,
+            stream.start_time,
+            stream.end_time,
+            now,
+            stream.paused_duration,
+        ),
         CURVE_MILESTONE => match &stream.milestones {
             // Milestones are keyed to absolute ledger timestamps, not
             // pause-adjusted elapsed time, so `now` is passed directly.

@@ -1238,6 +1238,166 @@ fn test_stream_history_nonexistent_stream() {
     let history = c.get_stream_history(&999);
     assert_eq!(history.len(), 0);
 }
+// ---------------------------------------------------------------------------
+// Issue #1445 — calculate_unlocked_exponential (exponential / quadratic vesting)
+// ---------------------------------------------------------------------------
+
+use crate::math::calculate_unlocked_exponential;
+use crate::math::calculate_unlocked;
+
+/// Before the stream starts nothing is unlocked.
+#[test]
+fn test_exponential_before_start_is_zero() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 100, 200, 0, 0), 0);
+    assert_eq!(calculate_unlocked_exponential(10_000, 100, 200, 99, 0), 0);
+    assert_eq!(calculate_unlocked_exponential(10_000, 100, 200, 100, 0), 0);
+}
+
+/// Exactly at the start time nothing is unlocked.
+#[test]
+fn test_exponential_at_start_is_zero() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 0, 0), 0);
+}
+
+/// At or after the end time everything is unlocked.
+#[test]
+fn test_exponential_after_end_is_full() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 100, 0), 10_000);
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 100_000, 0), 10_000);
+    assert_eq!(calculate_unlocked_exponential(10_000, 50, 100, 150, 500), 10_000);
+}
+
+/// Early stage unlocks slowly: at 10% time only 1% is unlocked.
+#[test]
+fn test_exponential_early_stage_slow_unlock() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 10, 0), 100);
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 25, 0), 625);
+}
+
+/// Mid stage: at 50% time only 25% is unlocked (quadratic, not linear).
+#[test]
+fn test_exponential_mid_stage_quarter() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 50, 0), 2_500);
+}
+
+/// The checkpoint from the issue: 50% unlocked at ~70.7% of time.
+#[test]
+fn test_exponential_seventy_percent_checkpoint_half() {
+    // 70.7% of 100 seconds -> elapsed=70, 70^2/100^2 = 0.49 -> 4_900.
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 70, 0), 4_900);
+    assert!(calculate_unlocked_exponential(10_000, 0, 100, 70, 0) <= 5_000);
+    // A finer sample near the true 50% checkpoint: duration 10_000, t=7_071.
+    let half = calculate_unlocked_exponential(10_000_000, 0, 10_000, 7_071, 0);
+    assert_eq!(half, 4_999_904);
+}
+
+/// Late stage unlocks fast: at 90% time 81% is unlocked.
+#[test]
+fn test_exponential_late_stage_fast_unlock() {
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 90, 0), 8_100);
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 99, 0), 9_801);
+}
+
+/// Paused duration is subtracted from elapsed time.
+#[test]
+fn test_exponential_subtracts_paused_duration() {
+    // No pause: elapsed=50 -> 25%.
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 50, 0), 2_500);
+    // 10 seconds paused: effective elapsed=40 -> 16%.
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 50, 10), 1_600);
+    // Pause >= raw elapsed -> effective elapsed 0.
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 50, 50), 0);
+    assert_eq!(calculate_unlocked_exponential(10_000, 0, 100, 50, 500), 0);
+}
+
+/// Large amounts with a small elapsed time stay inside i128 and unlock a
+/// positive, bounded result (never a wrap or panic).
+#[test]
+fn test_exponential_large_amounts_no_overflow() {
+    // Maximal-strength amount. With elapsed=1 the squared product is exactly
+    // `amount * 1`, which fits, and the result is `amount / duration²`.
+    let big = i128::MAX;
+    let out = calculate_unlocked_exponential(big, 0, 1_000, 1, 0);
+    assert!(out > 0);
+    assert!(out <= big);
+    assert_eq!(out, big / 1_000_000);
+
+    // A large realistic amount over a one-year duration reaches ~1/4 at 50%.
+    let yearly = 100_000_000_000_000_000_i128; // 1e17
+    let start = 1_700_000_000u64;
+    let dur = 31_536_000u64; // 1 year in seconds
+    let at_half = calculate_unlocked_exponential(yearly, start, start + dur, start + dur / 2, 0);
+    assert!(at_half > 0);
+    assert!(at_half <= yearly);
+    // elapsed == duration/2 exactly -> unlocked == yearly / 4, exactly.
+    assert_eq!(at_half, 25_000_000_000_000_000);
+}
+
+/// Force overflow of the intermediate product -> guarded to 0 (safe).
+#[test]
+fn test_exponential_overflow_prevention() {
+    assert_eq!(
+        calculate_unlocked_exponential(i128::MAX, 0, u64::MAX, u64::MAX - 1, 0),
+        0
+    );
+}
+
+/// Result is always <= total_amount across the whole curve.
+#[test]
+fn test_exponential_always_within_total() {
+    let total = 1_000_000_000_i128;
+    let start = 0u64;
+    let end = 1_000u64;
+    for t in 0..=1_000u64 {
+        for p in [0u64, 10, 200, 400] {
+            let v = calculate_unlocked_exponential(total, start, end, t, p);
+            assert!(v >= 0, "negative at t={t}");
+            assert!(v <= total, "exceeded total at t={t}");
+        }
+    }
+}
+
+/// Curve comparison with the linear curve.
+#[test]
+fn test_exponential_early_less_than_linear_less_than_late() {
+    let total = 10_000_i128;
+    let start = 0u64;
+    let end = 100u64;
+
+    // Early: exponential (900) is below linear (3_000).
+    let exp_early = calculate_unlocked_exponential(total, start, end, 30, 0);
+    let lin_early = calculate_unlocked(total, start, start, end, 30);
+    assert!(exp_early < lin_early, "exp early {exp_early} < linear {lin_early}");
+    assert_eq!(exp_early, 900);
+    assert_eq!(lin_early, 3_000);
+
+    // Mid (50%): linear 5_000, quadratic 2_500.
+    assert_eq!(calculate_unlocked_exponential(total, start, end, 50, 0), 2_500);
+    assert_eq!(calculate_unlocked(total, start, start, end, 50), 5_000);
+
+    // Late (90%): still below linear until full duration.
+    let exp_late = calculate_unlocked_exponential(total, start, end, 90, 0);
+    let lin_late = calculate_unlocked(total, start, start, end, 90);
+    assert!(exp_late < lin_late, "late exp {exp_late} vs linear {lin_late}");
+    assert!(exp_late < total);
+
+    // Final full unlock matches linear at 100%.
+    assert_eq!(
+        calculate_unlocked_exponential(total, start, end, 100, 0),
+        calculate_unlocked(total, start, start, end, 100),
+    );
+}
+
+/// Exponential is monotonic non-decreasing.
+#[test]
+fn test_exponential_monotonic() {
+    let mut prev = -1i128;
+    for t in 0..=100u64 {
+        let v = calculate_unlocked_exponential(10_000, 0, 100, t, 0);
+        assert!(v >= prev, "decreased at t={t}: {prev} -> {v}");
+        prev = v;
+    }
+    assert_eq!(prev, 10_000);
 
 // ---------------------------------------------------------------------------
 // Advanced query tests (issue #XXXX)
