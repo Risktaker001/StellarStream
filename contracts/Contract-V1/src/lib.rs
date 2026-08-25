@@ -217,6 +217,14 @@ pub enum Error {
     InsufficientFlashRepayment = 104,
     FlashLoanCallbackFailed = 105,
     FlashLoanFeeOverflow = 106,
+
+    // ===== Recurrence errors =====
+    /// The maximum number of recurring stream occurrences has been reached.
+    MaxOccurrencesReached = 110,
+    /// The stream is not configured for recurrence.
+    RecurrenceNotEnabled = 111,
+    /// Insufficient contract balance to auto-renew the recurring stream.
+    InsufficientRenewalBalance = 112,
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +250,72 @@ pub struct Stream {
     pub milestones: Option<Vec<Milestone>>,
     /// If true, the sender may raise clawback requests on this stream.
     pub clawback_enabled: bool,
+    /// Whether this stream is part of a recurring series.
+    pub is_recurring: bool,
+    /// Recurrence configuration, present only when `is_recurring == true`.
+    pub recurrence_config: Option<RecurrenceConfig>,
+}
+
+// ---------------------------------------------------------------------------
+// Recurring stream configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for a recurring stream that auto-renews after each period.
+///
+/// When a recurring stream completes and the sender fully withdraws, the
+/// contract automatically creates a new stream for the next period using
+/// the parameters stored here. Renewal stops when:
+///
+/// - [`max_occurrences`] is reached (if non-zero), or
+/// - [`stop_recurring_stream`] is called by the sender, or
+/// - the contract balance is insufficient for the next period.
+///
+/// Set `max_occurrences = 0` for infinite recurrence.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RecurrenceConfig {
+    /// Whether recurrence is enabled for this stream.
+    pub enabled: bool,
+    /// Maximum number of periods (0 = infinite).
+    pub max_occurrences: u32,
+    /// Number of periods that have been completed so far.
+    pub occurrences_completed: u32,
+    /// Duration of each period in seconds.
+    pub period_duration: u64,
+    /// Amount unlocked per period.
+    pub amount_per_period: i128,
+    /// Start timestamp of the current period.
+    pub current_period_start: u64,
+    /// End timestamp of the current period.
+    pub current_period_end: u64,
+    /// Whether the sender has manually stopped recurrence.
+    pub stopped: bool,
+}
+
+/// Emitted when a recurring stream auto-renews into the next period.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RecurringStreamRenewedEvent {
+    /// ID of the completed stream.
+    pub parent_stream_id: u64,
+    /// ID of the newly created child stream.
+    pub child_stream_id: u64,
+    /// Number of occurrences completed after this renewal.
+    pub occurrences_completed: u32,
+    /// Timestamp of the renewal.
+    pub timestamp: u64,
+}
+
+/// Emitted when a recurring stream is manually stopped.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RecurringStreamStoppedEvent {
+    /// ID of the recurring stream.
+    pub stream_id: u64,
+    /// Address that stopped it.
+    pub stopped_by: Address,
+    /// Timestamp of the stop.
+    pub timestamp: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -1499,6 +1573,123 @@ impl StellarStreamContract {
     pub fn get_clawback_request(env: Env, clawback_id: u64) -> Option<ClawbackRequest> {
         clawback::get_clawback_request(&env, clawback_id)
     }
+
+    // ===== Recurring stream entry points =====
+
+    /// Create a recurring stream that auto-renews after each period.
+    ///
+    /// Transfers `amount_per_period` from `sender` and creates the first
+    /// period's stream. When the sender fully withdraws from the completed
+    /// stream, the contract automatically creates the next period's stream
+    /// (up to `max_occurrences`, or infinitely if `max_occurrences == 0`).
+    ///
+    /// Returns the newly allocated stream id of the first period.
+    pub fn create_recurring_stream(
+        env: Env,
+        sender: Address,
+        receiver: Address,
+        token: Address,
+        amount_per_period: i128,
+        period_duration: u64,
+        max_occurrences: u32,
+    ) -> Result<u64, Error> {
+        sender.require_auth();
+        extend_instance_ttl(&env);
+
+        if amount_per_period <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        if period_duration == 0 {
+            return Err(Error::InvalidTimeRange);
+        }
+
+        let now = env.ledger().timestamp();
+        let end_time = now + period_duration;
+
+        let stream_id = create_stream_internal(
+            &env,
+            &sender,
+            &receiver,
+            &token,
+            amount_per_period,
+            now,
+            end_time,
+            CURVE_LINEAR,
+            false,
+            false,
+            None,
+        )?;
+
+        // Mark the stream as recurring and attach config.
+        let mut stream = get_stream(&env, stream_id)?;
+        stream.is_recurring = true;
+        stream.recurrence_config = Some(RecurrenceConfig {
+            enabled: true,
+            max_occurrences,
+            occurrences_completed: 0,
+            period_duration,
+            amount_per_period,
+            current_period_start: now,
+            current_period_end: end_time,
+            stopped: false,
+        });
+        save_stream(&env, &stream);
+
+        collect_protocol_fee(&env, &sender, &token, stream_id, amount_per_period)?;
+
+        env.events().publish(
+            (symbol_short!("rec_stream"), sender.clone()),
+            stream_id,
+        );
+        Ok(stream_id)
+    }
+
+    /// Stop a recurring stream from auto-renewing.
+    ///
+    /// Only the stream's sender may call this. The current period's stream
+    /// continues to function normally; only future renewals are suppressed.
+    pub fn stop_recurring_stream(
+        env: Env,
+        stream_id: u64,
+        sender: Address,
+    ) -> Result<(), Error> {
+        sender.require_auth();
+        extend_instance_ttl(&env);
+        let mut stream = get_stream(&env, stream_id)?;
+        if stream.sender != sender {
+            return Err(Error::Unauthorized);
+        }
+        if !stream.is_recurring {
+            return Err(Error::RecurrenceNotEnabled);
+        }
+        let mut config = stream.recurrence_config.ok_or(Error::RecurrenceNotEnabled)?;
+        if config.stopped {
+            return Err(Error::AlreadyCancelled);
+        }
+        config.stopped = true;
+        config.enabled = false;
+        stream.recurrence_config = Some(config);
+        save_stream(&env, &stream);
+
+        env.events().publish(
+            (symbol_short!("rec_stop"), sender.clone()),
+            RecurringStreamStoppedEvent {
+                stream_id,
+                stopped_by: sender,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Return the recurrence configuration for a stream, if any.
+    pub fn get_recurrence_config(
+        env: Env,
+        stream_id: u64,
+    ) -> Option<RecurrenceConfig> {
+        let stream = get_stream(&env, stream_id).ok()?;
+        stream.recurrence_config
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1539,7 +1730,96 @@ fn withdraw_inner(env: &Env, stream_id: u64, receiver: &Address) -> Result<i128,
     // Record history event
     add_history(env, stream_id, StreamAction::Withdrawn(withdrawable));
 
+    // Auto-renew recurring stream if the period is fully withdrawn.
+    if stream.is_recurring {
+        let reloaded = get_stream(env, stream_id)?;
+        if let Some(ref config) = reloaded.recurrence_config {
+            if config.enabled && !config.stopped {
+                let total = reloaded.total_amount;
+                if reloaded.withdrawn_amount >= total {
+                    // Period fully withdrawn — attempt renewal (best-effort).
+                    let _ = try_renew_recurring_stream(env, &reloaded);
+                }
+            }
+        }
+    }
+
     Ok(withdrawable)
+}
+
+/// Attempt to create the next period's stream for a recurring series.
+///
+/// Called after the sender fully withdraws from a completed recurring
+/// stream. Checks balance, enforces max occurrences, and creates a new
+/// stream linked via [`DataKey::RecurringChildStreamId`].
+fn try_renew_recurring_stream(env: &Env, stream: &Stream) -> Result<u64, Error> {
+    let mut config = stream.recurrence_config.as_ref().ok_or(Error::RecurrenceNotEnabled)?.clone();
+
+    if !config.enabled || config.stopped {
+        return Err(Error::RecurrenceNotEnabled);
+    }
+
+    // Check max occurrences.
+    if config.max_occurrences > 0 && config.occurrences_completed >= config.max_occurrences {
+        return Err(Error::MaxOccurrencesReached);
+    }
+
+    let new_start = config.current_period_end;
+    let new_end = new_start + config.period_duration;
+
+    // Check contract has enough tokens for the next period.
+    let token_client = TokenClient::new(env, &stream.token);
+    let balance = token_client.balance(&env.current_contract_address());
+    if balance < config.amount_per_period {
+        return Err(Error::InsufficientRenewalBalance);
+    }
+
+    // Create the next child stream.
+    let child_id = create_stream_internal(
+        env,
+        &stream.sender,
+        &stream.receiver,
+        &stream.token,
+        config.amount_per_period,
+        new_start,
+        new_end,
+        CURVE_LINEAR,
+        false,
+        false,
+        None,
+    )?;
+
+    // Update the parent's recurrence config.
+    config.occurrences_completed += 1;
+    config.current_period_start = new_start;
+    config.current_period_end = new_end;
+
+    // If max occurrences reached after this renewal, disable further renewals.
+    if config.max_occurrences > 0 && config.occurrences_completed >= config.max_occurrences {
+        config.enabled = false;
+    }
+
+    let mut updated_stream = get_stream(env, stream.id)?;
+    updated_stream.recurrence_config = Some(config);
+    save_stream(env, &updated_stream);
+
+    // Link the child to the parent.
+    env.storage().persistent().set(
+        &DataKey::RecurringChildStreamId(stream.id),
+        &child_id,
+    );
+
+    env.events().publish(
+        (symbol_short!("rec_renew"), stream.sender.clone()),
+        RecurringStreamRenewedEvent {
+            parent_stream_id: stream.id,
+            child_stream_id: child_id,
+            occurrences_completed: updated_stream.recurrence_config.as_ref().unwrap().occurrences_completed,
+            timestamp: env.ledger().timestamp(),
+        },
+    );
+
+    Ok(child_id)
 }
 
 fn unlocked_amount(env: &Env, stream: &Stream) -> i128 {
@@ -1713,6 +1993,8 @@ fn create_stream_internal(
         last_paused_at: 0,
         milestones,
         clawback_enabled,
+        is_recurring: false,
+        recurrence_config: None,
     };
 
     env.storage().persistent().set(&DataKey::Stream(id), &stream);
@@ -2155,3 +2437,6 @@ mod fee_test;
 
 #[cfg(test)]
 mod flash_loan_test;
+-e 
+#[cfg(test)]
+mod recurring_test;

@@ -98,6 +98,12 @@ pub enum DataKey {
     ClawbackCounter,
 
     // -----------------------------------------------------------------------
+    // Persistent storage: recurring stream records (long-term, TTL-extended on access).
+    // -----------------------------------------------------------------------
+    /// Maps a parent recurring stream to its current child stream id.
+    RecurringChildStreamId(u64),
+
+    // -----------------------------------------------------------------------
     // Temporary storage: transaction-scoped, cleared automatically.
     // -----------------------------------------------------------------------
     /// Re-entrancy mutex (true while a protected call is executing).
