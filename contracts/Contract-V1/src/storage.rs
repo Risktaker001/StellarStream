@@ -70,6 +70,8 @@ pub enum DataKey {
     FeeBps,
     /// Address protocol fees are collected to.
     Treasury,
+    /// Current contract version (incremented on each WASM upgrade).
+    Version,
 
     // -----------------------------------------------------------------------
     // Persistent storage: long-term data, must be TTL-extended on access.

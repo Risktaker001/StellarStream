@@ -135,8 +135,13 @@ pub const BPS_DENOMINATOR: i128 = 10_000;
 pub const MAX_FEE_BPS: u32 = 1_000;
 
 // Monitoring
-/// Version reported by [`StellarStreamContract::health_check`].
+/// Compile-time version marker. The runtime version (stored in instance
+/// storage and incremented on each upgrade) is the source of truth for
+/// [`StellarStreamContract::get_version`].
 pub const CONTRACT_VERSION: u32 = 1;
+
+/// Initial version written to instance storage on first deployment.
+const INITIAL_VERSION: u32 = 1;
 /// Width of the rolling metrics window, in hourly buckets.
 pub const METRICS_WINDOW_HOURS: u64 = 24;
 /// Seconds per metrics bucket.
@@ -217,6 +222,12 @@ pub enum Error {
     InsufficientFlashRepayment = 104,
     FlashLoanCallbackFailed = 105,
     FlashLoanFeeOverflow = 106,
+
+    // ===== Upgrade errors =====
+    /// The provided WASM hash is invalid or cannot be used for upgrade.
+    InvalidWasmHash = 120,
+    /// The upgrade failed at the deployer level.
+    UpgradeFailed = 121,
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +323,20 @@ pub struct ContractHealth {
     pub last_activity_time: u64,
     /// Contract version, see [`CONTRACT_VERSION`].
     pub version: u32,
+}
+
+/// Emitted when the contract WASM is upgraded.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ContractUpgradedEvent {
+    /// Version before the upgrade.
+    pub old_version: u32,
+    /// Version after the upgrade.
+    pub new_version: u32,
+    /// SHA-256 hash of the new WASM.
+    pub new_wasm_hash: soroban_sdk::BytesN<32>,
+    /// Timestamp of the upgrade.
+    pub timestamp: u64,
 }
 
 /// Rolling 24-hour usage statistics.
@@ -586,6 +611,7 @@ impl StellarStreamContract {
         env.storage().instance().set(&DataKey::ContractPaused, &false);
         env.storage().instance().set(&DataKey::StreamCounter, &1u64);
         env.storage().instance().set(&DataKey::ProposalCounter, &1u64);
+        env.storage().instance().set(&DataKey::Version, &INITIAL_VERSION);
         grant_role_internal(env.clone(), &admin, ROLE_ADMIN);
         Ok(())
     }
@@ -1499,6 +1525,67 @@ impl StellarStreamContract {
     pub fn get_clawback_request(env: Env, clawback_id: u64) -> Option<ClawbackRequest> {
         clawback::get_clawback_request(&env, clawback_id)
     }
+
+    // ===== Upgrade entry points =====
+
+    /// Upgrade the contract WASM to a new version.
+    ///
+    /// Requires the caller to hold [`ROLE_ADMIN`]. Replaces the running
+    /// bytecode atomically via [`env.deployer().update_current_contract_wasm`],
+    /// increments the version counter in instance storage, and emits a
+    /// [`ContractUpgradedEvent`].
+    ///
+    /// Instance storage (streams, proposals, metrics, roles, etc.) persists
+    /// automatically across upgrades because Soroban instance storage is
+    /// keyed by contract address, not by WASM hash.
+    ///
+    /// # Arguments
+    /// * `admin` — must hold the Admin role and have authorized this call.
+    /// * `new_wasm_hash` — SHA-256 hash of the compiled WASM to deploy.
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: soroban_sdk::BytesN<32>,
+    ) -> Result<(), Error> {
+        admin.require_auth();
+        extend_instance_ttl(&env);
+        require_admin(&env, &admin)?;
+
+        let old_version: u32 = env
+            .storage()
+            .instance()
+            .get::<_, u32>(&DataKey::Version)
+            .unwrap_or(INITIAL_VERSION);
+
+        // Perform the atomic WASM upgrade.
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+
+        let new_version = old_version + 1;
+        env.storage().instance().set(&DataKey::Version, &new_version);
+
+        env.events().publish(
+            (symbol_short!("upgrade"), admin.clone()),
+            ContractUpgradedEvent {
+                old_version,
+                new_version,
+                new_wasm_hash,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Return the current contract version from instance storage.
+    ///
+    /// Returns [`INITIAL_VERSION`] (1) for the original deployment, and
+    /// increments by 1 each time [`upgrade`] is called successfully.
+    pub fn get_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get::<_, u32>(&DataKey::Version)
+            .unwrap_or(INITIAL_VERSION)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2155,3 +2242,6 @@ mod fee_test;
 
 #[cfg(test)]
 mod flash_loan_test;
+-e 
+#[cfg(test)]
+mod upgrade_test;
