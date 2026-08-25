@@ -134,6 +134,7 @@
 //! Every step emits an event (`dispute/raised`, `dispute/voted`,
 //! `dispute/resolved`) so indexers can follow the full lifecycle.
 
+pub mod errors;
 pub mod flash_loan;
 pub mod math;
 pub mod storage;
@@ -213,6 +214,8 @@ pub const MAX_ARBITRATION_THRESHOLD: u32 = 100;
 /// are rejected, and the dispute may then be closed permissionlessly.
 pub const DISPUTE_VOTING_PERIOD_SECS: u64 = 7 * 24 * SECONDS_PER_HOUR;
 
+// Re-export the error enum from the errors module.
+pub use errors::Error;
 // ---------------------------------------------------------------------------
 // Error definitions
 // ---------------------------------------------------------------------------
