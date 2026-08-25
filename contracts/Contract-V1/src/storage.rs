@@ -70,6 +70,8 @@ pub enum DataKey {
     FeeBps,
     /// Address protocol fees are collected to.
     Treasury,
+    /// Current contract version (incremented on each WASM upgrade).
+    Version,
     /// Next dispute id to allocate.
     DisputeCounter,
     /// Number of arbitrator approvals required to auto-execute a resolution.
