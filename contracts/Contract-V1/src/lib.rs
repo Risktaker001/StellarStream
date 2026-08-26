@@ -100,6 +100,7 @@ pub mod math;
 pub mod storage;
 pub mod clawback;
 pub mod compliance;
+pub mod oracle;
 
 #[cfg(test)]
 mod bench_test;
@@ -107,6 +108,18 @@ mod bench_test;
 mod clawback_test;
 #[cfg(test)]
 mod compliance_test;
+#[cfg(test)]
+mod fee_test;
+#[cfg(test)]
+mod metrics_test;
+#[cfg(test)]
+mod proposal_test;
+#[cfg(test)]
+mod security_test;
+#[cfg(test)]
+mod stress_test;
+#[cfg(test)]
+mod advanced_test;
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, Address,
@@ -209,6 +222,14 @@ pub enum Error {
     ClawbackExpired = 48,
     /// The clawback request was rejected.
     ClawbackRejected = 49,
+
+    // ===== Oracle/USD errors =====
+    /// Oracle price is outside the acceptable slippage bounds.
+    OraclePriceOutOfBounds = 50,
+    /// Oracle returned an invalid price (e.g., zero or negative).
+    OraclePriceInvalid = 51,
+    /// USD amount is invalid or too small to convert to tokens.
+    InvalidUsdAmount = 52,
 }
 
 // ---------------------------------------------------------------------------
@@ -446,6 +467,49 @@ impl Default for StreamFilter {
     }
 }
 
+/// Configuration for USD-pegged stream creation.
+///
+/// This struct holds the oracle and slippage parameters needed to convert
+/// a USD amount to token amount at stream creation time. The conversion
+/// happens once at creation; the stream then vests the calculated token
+/// amount normally.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct UsdStreamConfig {
+    /// The USD amount to stream (in basis points; 10_000 = $1.00).
+    pub usd_amount: i128,
+    /// Address of the oracle contract providing price feeds.
+    pub oracle: Address,
+    /// Minimum acceptable token price in USD (basis points).
+    /// Protects against unfavorable pricing.
+    pub min_price: i128,
+    /// Maximum acceptable token price in USD (basis points).
+    /// Protects against price spikes.
+    pub max_price: i128,
+}
+
+/// Event emitted when a USD-pegged stream is created.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamCreatedUsdEvent {
+    /// The created stream's ID.
+    pub stream_id: u64,
+    /// The sender who funded the stream.
+    pub sender: Address,
+    /// The receiver of the stream.
+    pub receiver: Address,
+    /// The token being streamed.
+    pub token: Address,
+    /// The USD amount requested (in basis points).
+    pub usd_amount: i128,
+    /// The token amount actually created (after oracle conversion).
+    pub token_amount: i128,
+    /// The oracle price used for conversion (in basis points).
+    pub price_usd_bps: i128,
+    /// Stream creation timestamp.
+    pub timestamp: u64,
+}
+
 // Minimal token interface used by `withdraw`.
 #[contractclient(name = "TokenClient")]
 pub trait Token {
@@ -587,6 +651,110 @@ impl StellarStreamContract {
             milestones,
         )?;
         collect_protocol_fee(&env, &sender, &token, stream_id, total_amount)?;
+        Ok(stream_id)
+    }
+
+    /// Create a new USD-pegged stream, converting USD amount to tokens via oracle.
+    ///
+    /// This function queries an oracle for the current token price, validates it
+    /// against slippage bounds, converts the USD amount to token amount, and then
+    /// creates a regular stream with the calculated token amount.
+    ///
+    /// # Arguments
+    /// - `sender`: The stream creator and funder.
+    /// - `receiver`: The stream recipient.
+    /// - `token`: The token to stream (price will be queried from oracle).
+    /// - `usd_amount`: The USD amount to stream (basis points; 10_000 = $1.00).
+    /// - `oracle`: The oracle contract address for price feeds.
+    /// - `min_price`: Minimum acceptable token USD price (basis points).
+    /// - `max_price`: Maximum acceptable token USD price (basis points).
+    /// - `stream_params`: A tuple containing (start_time, end_time, curve_type, is_soulbound, clawback_enabled, milestones).
+    ///
+    /// # Returns
+    /// The ID of the created stream.
+    ///
+    /// # Slippage Protection
+    /// The oracle price is validated to be within [min_price, max_price] (inclusive).
+    /// If the price is outside this range, creation fails with [`Error::OraclePriceOutOfBounds`].
+    ///
+    /// # Events
+    /// Emits a [`StreamCreatedUsdEvent`] with details of the USD conversion.
+    ///
+    /// # Errors
+    /// - [`Error::InvalidUsdAmount`]: If USD amount <= 0.
+    /// - [`Error::OraclePriceOutOfBounds`]: If oracle price is outside bounds.
+    /// - [`Error::OraclePriceInvalid`]: If oracle returns invalid price.
+    /// - [`Error::Overflow`]: If token amount calculation overflows.
+    /// - Other errors from [`create_stream`].
+    pub fn create_stream_usd(
+        env: Env,
+        sender: Address,
+        receiver: Address,
+        token: Address,
+        usd_amount: i128,
+        oracle: Address,
+        min_price: i128,
+        max_price: i128,
+        start_time: u64,
+        end_time: u64,
+    ) -> Result<u64, Error> {
+        sender.require_auth();
+        extend_instance_ttl(&env);
+
+        // Validate USD amount
+        if usd_amount <= 0 {
+            return Err(Error::InvalidUsdAmount);
+        }
+
+        // Fetch price from oracle with slippage protection
+        let price_usd_bps = oracle::fetch_price_with_slippage(
+            &env,
+            &oracle,
+            &token,
+            min_price,
+            max_price,
+        )?;
+
+        // Convert USD amount to token amount
+        let token_amount = oracle::usd_to_tokens(usd_amount, price_usd_bps)?;
+
+        if token_amount <= 0 {
+            return Err(Error::InvalidUsdAmount);
+        }
+
+        // Create the stream with calculated token amount (linear curve, no special features)
+        let stream_id = create_stream_internal(
+            &env,
+            &sender,
+            &receiver,
+            &token,
+            token_amount,
+            start_time,
+            end_time,
+            CURVE_LINEAR,
+            false,
+            false,
+            None,
+        )?;
+
+        // Collect protocol fee based on token amount
+        collect_protocol_fee(&env, &sender, &token, stream_id, token_amount)?;
+
+        // Emit USD creation event
+        env.events().publish(
+            (symbol_short!("usd_creat"), sender.clone()),
+            StreamCreatedUsdEvent {
+                stream_id,
+                sender,
+                receiver,
+                token,
+                usd_amount,
+                token_amount,
+                price_usd_bps,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
         Ok(stream_id)
     }
 

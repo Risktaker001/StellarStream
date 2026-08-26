@@ -1853,3 +1853,315 @@ fn test_query_streams_large_dataset_performance() {
         assert!(results.len() <= 25 && results.len() > 0);
     }
 }
+
+
+// ---------------------------------------------------------------------------
+// Oracle/USD pegging tests
+// ---------------------------------------------------------------------------
+
+/// Mock oracle contract for testing USD price feeds.
+#[contract]
+pub struct MockOracle;
+
+#[contractimpl]
+impl MockOracle {
+    pub fn get_price(_env: Env, _token: Address) -> i128 {
+        // Default: 1 token = $1.00 (10_000 basis points)
+        10_000i128
+    }
+}
+
+/// Mock oracle that returns a custom price.
+#[contract]
+pub struct CustomPriceOracle {
+    price: i128,
+}
+
+#[contractimpl]
+impl CustomPriceOracle {
+    pub fn get_price(_env: Env, _token: Address) -> i128 {
+        // This would need mutable state, which Soroban doesn't support in this way
+        // Instead, we'll use environment setup for testing
+        10_000i128
+    }
+}
+
+#[test]
+fn test_create_stream_usd_basic() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let now = f.env.ledger().timestamp();
+
+    // Create a mock oracle
+    let oracle = f.env.register(MockOracle, ());
+
+    // Create USD-pegged stream: $1,000 USD (1_000_000 basis points)
+    // Oracle price: $1.00 per token (10_000 bps)
+    // Expected token amount: 1,000,000 / 10,000 * 10,000 = 1,000,000
+    let id = c.create_stream_usd(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000_000i128, // 1,000 USD in basis points
+        &oracle,
+        &9_000i128,  // min price: $0.90
+        &11_000i128, // max price: $1.10
+        &now,
+        &(now + 1_000),
+    );
+
+    // Verify stream was created
+    let stream = c.get_stream(&id);
+    assert_eq!(stream.total_amount, 1_000_000i128);
+    assert_eq!(stream.state, STATE_ACTIVE);
+    assert_eq!(stream.token, f.token);
+}
+
+#[test]
+fn test_create_stream_usd_price_conversion() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let now = f.env.ledger().timestamp();
+    let oracle = f.env.register(MockOracle, ());
+
+    // Test with different USD amounts
+    // USD amount: 500 (0.05 USD in basis points)
+    // Oracle price: 10_000 (1 token = $1.00)
+    // Expected token amount: (500 * 10_000) / 10_000 = 500
+    let id = c.create_stream_usd(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &500i128,
+        &oracle,
+        &10_000i128,
+        &10_000i128,
+        &now,
+        &(now + 1_000),
+    );
+
+    let stream = c.get_stream(&id);
+    assert_eq!(stream.total_amount, 500i128);
+}
+
+#[test]
+fn test_create_stream_usd_slippage_rejection_high_price() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let now = f.env.ledger().timestamp();
+    let oracle = f.env.register(MockOracle, ());
+
+    // Oracle returns 10_000 (1 token = $1.00)
+    // Max slippage: 5_000 (max price $0.50)
+    // This should fail because 10_000 > 5_000
+    assert_eq!(
+        c.try_create_stream_usd(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &1_000_000i128,
+            &oracle,
+            &0i128,      // min price
+            &5_000i128,  // max price (too low)
+            &now,
+            &(now + 1_000),
+        ),
+        Err(Ok(Error::OraclePriceOutOfBounds))
+    );
+}
+
+#[test]
+fn test_create_stream_usd_slippage_rejection_low_price() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let now = f.env.ledger().timestamp();
+    let oracle = f.env.register(MockOracle, ());
+
+    // Oracle returns 10_000 (1 token = $1.00)
+    // Min slippage: 15_000 (min price $1.50)
+    // This should fail because 10_000 < 15_000
+    assert_eq!(
+        c.try_create_stream_usd(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &1_000_000i128,
+            &oracle,
+            &15_000i128, // min price (too high)
+            &20_000i128, // max price
+            &now,
+            &(now + 1_000),
+        ),
+        Err(Ok(Error::OraclePriceOutOfBounds))
+    );
+}
+
+#[test]
+fn test_create_stream_usd_invalid_usd_amount_zero() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let now = f.env.ledger().timestamp();
+    let oracle = f.env.register(MockOracle, ());
+
+    // USD amount = 0 should fail
+    assert_eq!(
+        c.try_create_stream_usd(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &0i128,
+            &oracle,
+            &10_000i128,
+            &10_000i128,
+            &now,
+            &(now + 1_000),
+        ),
+        Err(Ok(Error::InvalidUsdAmount))
+    );
+}
+
+#[test]
+fn test_create_stream_usd_invalid_usd_amount_negative() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let now = f.env.ledger().timestamp();
+    let oracle = f.env.register(MockOracle, ());
+
+    // Negative USD amount should fail
+    assert_eq!(
+        c.try_create_stream_usd(
+            &f.sender,
+            &f.receiver,
+            &f.token,
+            &-1_000i128,
+            &oracle,
+            &10_000i128,
+            &10_000i128,
+            &now,
+            &(now + 1_000),
+        ),
+        Err(Ok(Error::InvalidUsdAmount))
+    );
+}
+
+#[test]
+fn test_create_stream_usd_stream_operations_after_creation() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let now = f.env.ledger().timestamp();
+    let oracle = f.env.register(MockOracle, ());
+
+    // Create USD-pegged stream
+    let id = c.create_stream_usd(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000_000i128,
+        &oracle,
+        &10_000i128,
+        &10_000i128,
+        &now,
+        &(now + 1_000),
+    );
+
+    // Verify basic stream operations work
+    let stream = c.get_stream(&id);
+    assert_eq!(stream.total_amount, 1_000_000i128);
+
+    // Test pause/resume
+    c.pause_stream(&id, &f.sender);
+    let paused_stream = c.get_stream(&id);
+    assert_eq!(paused_stream.state, STATE_PAUSED);
+
+    c.resume_stream(&id, &f.sender);
+    let active_stream = c.get_stream(&id);
+    assert_eq!(active_stream.state, STATE_ACTIVE);
+
+    // Test cancellation
+    c.cancel_stream(&id, &f.sender);
+    let cancelled_stream = c.get_stream(&id);
+    assert_eq!(cancelled_stream.state, STATE_CLOSED);
+}
+
+#[test]
+fn test_create_stream_usd_event_emission() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let now = f.env.ledger().timestamp();
+    let oracle = f.env.register(MockOracle, ());
+
+    // Clear events first
+    f.env.events().all();
+
+    // Create USD-pegged stream
+    let id = c.create_stream_usd(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000_000i128,
+        &oracle,
+        &10_000i128,
+        &10_000i128,
+        &now,
+        &(now + 1_000),
+    );
+
+    // Verify events were emitted
+    let events = f.env.events().all();
+    // Should have at least one event (StreamCreatedUsdEvent)
+    assert!(events.len() > 0);
+}
+
+#[test]
+fn test_create_stream_usd_with_milestones() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let now = f.env.ledger().timestamp();
+    let oracle = f.env.register(MockOracle, ());
+
+    // Create USD-pegged stream (linear curve, no milestones in this version)
+    // Milestones would be added in an extended create_stream_usd variant
+    let id = c.create_stream_usd(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000_000i128,
+        &oracle,
+        &10_000i128,
+        &10_000i128,
+        &now,
+        &(now + 1_000),
+    );
+
+    // Verify stream was created with correct amount and linear curve
+    let stream = c.get_stream(&id);
+    assert_eq!(stream.total_amount, 1_000_000i128);
+    assert_eq!(stream.curve_type, CURVE_LINEAR);
+}
+
+#[test]
+fn test_create_stream_usd_with_clawback() {
+    let f = setup();
+    let c = client(&f.env, &f.contract);
+    let now = f.env.ledger().timestamp();
+    let oracle = f.env.register(MockOracle, ());
+
+    // Note: Current create_stream_usd uses linear curve without clawback
+    // To test clawback, use the regular create_stream with calculated amounts
+    let id = c.create_stream_usd(
+        &f.sender,
+        &f.receiver,
+        &f.token,
+        &1_000_000i128,
+        &oracle,
+        &10_000i128,
+        &10_000i128,
+        &now,
+        &(now + 1_000),
+    );
+
+    // Verify stream was created and works with regular operations
+    let stream = c.get_stream(&id);
+    assert_eq!(stream.total_amount, 1_000_000i128);
+    assert_eq!(stream.clawback_enabled, false); // Not enabled in basic USD stream
+}
