@@ -104,6 +104,14 @@ pub enum DataKey {
     ClawbackCounter,
 
     // -----------------------------------------------------------------------
+    // Vault integration storage (long-term, TTL-extended on access).
+    // -----------------------------------------------------------------------
+    /// Approved vault addresses: `Map<Address, bool>`.
+    ApprovedVaults,
+    /// Vault shares for a stream: `VaultShares` indexed by stream id.
+    VaultShares(u64),
+    /// Accumulated interest for a stream: `i128` indexed by stream id.
+    AccumulatedInterest(u64),
     // Persistent storage: recurring stream records (long-term, TTL-extended on access).
     // -----------------------------------------------------------------------
     /// Maps a parent recurring stream to its current child stream id.
@@ -222,6 +230,11 @@ pub fn extend_clawback_ttl(env: &Env, clawback_id: u64) {
     );
 }
 
+/// Extend the TTL of a vault shares entry.
+pub fn extend_vault_shares_ttl(env: &Env, stream_id: u64) {
+    env.storage().persistent().extend_ttl(
+        &DataKey::VaultShares(stream_id),
+        LEDGER_BUMP_STREAM,
 /// Extend the TTL of a dispute's persistent entry.
 pub fn extend_dispute_ttl(env: &Env, dispute_id: u64) {
     env.storage().persistent().extend_ttl(
@@ -231,6 +244,14 @@ pub fn extend_dispute_ttl(env: &Env, dispute_id: u64) {
     );
 }
 
+/// Extend the TTL of an accumulated interest entry.
+pub fn extend_interest_ttl(env: &Env, stream_id: u64) {
+    env.storage().persistent().extend_ttl(
+        &DataKey::AccumulatedInterest(stream_id),
+        LEDGER_BUMP_STREAM,
+        MAX_TTL_STREAM,
+    );
+}
 /// Extend the TTL of a stream's active-dispute pointer, if the entry exists.
 ///
 /// The pointer is removed as soon as the dispute is resolved or closed, so the
