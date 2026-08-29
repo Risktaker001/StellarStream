@@ -108,6 +108,16 @@ pub enum DataKey {
     AccumulatedInterest(u64),
 
     // -----------------------------------------------------------------------
+    // Migration tracking storage (long-term, TTL-extended on access).
+    // -----------------------------------------------------------------------
+    /// Stream format version: `Map<u64, u32>` mapping stream_id to version.
+    StreamVersions,
+    /// Last migrated stream id for tracking migration progress.
+    LastMigratedStreamId,
+    /// Flag indicating migration is in progress (temporary lock).
+    MigrationInProgress,
+
+    // -----------------------------------------------------------------------
     // Temporary storage: transaction-scoped, cleared automatically.
     // -----------------------------------------------------------------------
     /// Re-entrancy mutex (true while a protected call is executing).
@@ -226,4 +236,14 @@ pub fn extend_interest_ttl(env: &Env, stream_id: u64) {
         LEDGER_BUMP_STREAM,
         MAX_TTL_STREAM,
     );
+}
+
+/// Extend the TTL of the stream versions map.
+pub fn bump_stream_versions_ttl(env: &Env) {
+    bump_persistent_ttl_if_present(env, &DataKey::StreamVersions);
+}
+
+/// Extend the TTL of the migration tracking entry.
+pub fn extend_migration_ttl(env: &Env) {
+    bump_persistent_ttl_if_present(env, &DataKey::LastMigratedStreamId);
 }
