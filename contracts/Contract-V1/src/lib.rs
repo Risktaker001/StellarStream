@@ -176,6 +176,7 @@ use storage::{
     bump_persistent_ttl_if_present, extend_history_ttl, extend_instance_ttl, extend_metadata_ttl,
     extend_proposal_ttl, extend_stream_ttl, extend_user_streams_ttl, extend_vault_shares_ttl,
     extend_interest_ttl, bump_stream_versions_ttl, extend_migration_ttl, DataKey,
+    extend_interest_ttl, DataKey,
     bump_persistent_ttl_if_present, extend_dispute_ttl, extend_history_ttl, extend_instance_ttl,
     extend_metadata_ttl, extend_proposal_ttl, extend_stream_ttl, extend_user_streams_ttl, DataKey,
 };
