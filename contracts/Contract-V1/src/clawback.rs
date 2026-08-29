@@ -32,8 +32,17 @@ use soroban_sdk::{symbol_short, token, Address, Env, String, Vec};
 use crate::{
     storage::{extend_clawback_ttl, DataKey},
     ClawbackApprovedEvent, ClawbackExecutedEvent, ClawbackRequest, ClawbackRequestedEvent,
-    ClawbackStatus, Error, Stream,
+    ClawbackStatus, Error, Stream, STATE_FROZEN,
 };
+
+/// Clawbacks move funds between the disputing parties, so they are blocked on
+/// frozen streams and while an arbitration is in flight (issue #1471).
+fn require_stream_operable(env: &Env, stream: &Stream) -> Result<(), Error> {
+    if stream.state == STATE_FROZEN {
+        return Err(Error::StreamFrozen);
+    }
+    crate::require_no_open_dispute(env, stream.id)
+}
 
 // ---------------------------------------------------------------------------
 // Public functions (called from lib.rs #[contractimpl])
@@ -67,6 +76,7 @@ pub fn request_clawback(
     if amount > stream.withdrawn_amount {
         return Err(Error::ClawbackExceedsWithdrawn);
     }
+    require_stream_operable(env, &stream)?;
 
     let clawback_id: u64 = env
         .storage()
@@ -140,6 +150,8 @@ pub fn approve_clawback(env: &Env, clawback_id: u64, approver: &Address) -> Resu
         .persistent()
         .get(&DataKey::Stream(req.stream_id))
         .ok_or(Error::StreamNotFound)?;
+
+    require_stream_operable(env, &stream)?;
 
     let mut by_receiver = false;
 
@@ -217,6 +229,10 @@ pub fn execute_clawback(env: &Env, clawback_id: u64) -> Result<(), Error> {
         .get(&DataKey::Stream(req.stream_id))
         .ok_or(Error::StreamNotFound)?;
 
+    // An approved clawback transfers funds between the parties; block it
+    // while an arbitration decides the stream's fate (issue #1471).
+    require_stream_operable(env, &stream)?;
+
     // Checks-effects-interactions: mark executed before the token transfer.
     req.status = ClawbackStatus::Executed;
     env.storage()
@@ -224,8 +240,7 @@ pub fn execute_clawback(env: &Env, clawback_id: u64) -> Result<(), Error> {
         .set(&DataKey::Clawback(clawback_id), &req);
     extend_clawback_ttl(env, clawback_id);
 
-    token::Client::new(env, &stream.token)
-        .transfer(&stream.receiver, &stream.sender, &req.amount);
+    token::Client::new(env, &stream.token).transfer(&stream.receiver, &stream.sender, &req.amount);
 
     env.events().publish(
         (symbol_short!("clawback"), symbol_short!("execute")),

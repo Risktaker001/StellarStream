@@ -10,7 +10,13 @@ use crate::common::*;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 
 /// Create `n` streams from `sender` to freshly generated receivers.
-fn create_many(env: &Env, contract: &Address, sender: &Address, token: &Address, n: u64) -> Vec<u64> {
+fn create_many(
+    env: &Env,
+    contract: &Address,
+    sender: &Address,
+    token: &Address,
+    n: u64,
+) -> Vec<u64> {
     let mut ids = Vec::new(env);
     for _ in 0..n {
         let receiver = Address::generate(env);
@@ -22,6 +28,7 @@ fn create_many(env: &Env, contract: &Address, sender: &Address, token: &Address,
             &0u64,
             &1_000_000u64,
             &CURVE_LINEAR,
+            &false,
             &false,
             &None,
         );
@@ -51,6 +58,7 @@ fn create_many_to(
             &1_000u64,
             &CURVE_LINEAR,
             &false,
+            &false,
             &None,
         );
         ids.push_back(id);
@@ -75,14 +83,7 @@ fn test_1000_active_streams() {
 #[test]
 fn test_100_concurrent_withdrawals() {
     let f = setup();
-    let ids = create_many_to(
-        &f.env,
-        &f.contract,
-        &f.sender,
-        &f.receiver,
-        &f.token,
-        100,
-    );
+    let ids = create_many_to(&f.env, &f.contract, &f.sender, &f.receiver, &f.token, 100);
     f.env.ledger().set_timestamp(500);
     let c = client(&f.env, &f.contract);
     let mut total = 0i128;
@@ -120,6 +121,7 @@ fn test_100_users() {
             &0u64,
             &1_000_000u64,
             &CURVE_LINEAR,
+            &false,
             &false,
             &None,
         );
@@ -195,6 +197,7 @@ fn test_mixed_curves_large() {
             &1_000u64,
             &curve,
             &false,
+            &false,
             &None,
         );
         ids.push_back(id);
@@ -237,6 +240,7 @@ fn test_realistic_data_distribution() {
             &0u64,
             &end,
             &CURVE_LINEAR,
+            &false,
             &false,
             &None,
         );
