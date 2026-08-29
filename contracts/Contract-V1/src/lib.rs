@@ -100,6 +100,7 @@ pub mod math;
 pub mod storage;
 pub mod clawback;
 pub mod compliance;
+pub mod vault;
 
 #[cfg(test)]
 mod bench_test;
@@ -107,6 +108,8 @@ mod bench_test;
 mod clawback_test;
 #[cfg(test)]
 mod compliance_test;
+#[cfg(test)]
+mod vault_test;
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, Address,
@@ -114,7 +117,8 @@ use soroban_sdk::{
 };
 use storage::{
     bump_persistent_ttl_if_present, extend_history_ttl, extend_instance_ttl, extend_metadata_ttl,
-    extend_proposal_ttl, extend_stream_ttl, extend_user_streams_ttl, DataKey,
+    extend_proposal_ttl, extend_stream_ttl, extend_user_streams_ttl, extend_vault_shares_ttl,
+    extend_interest_ttl, DataKey,
 };
 
 // Stream state
@@ -148,6 +152,16 @@ pub const MAX_TRACKED_USERS: u32 = 64;
 pub const ROLE_ADMIN: u32 = 0;
 pub const ROLE_PAUSER: u32 = 1;
 pub const ROLE_TREASURY: u32 = 2;
+
+// Vault integration
+/// Interest strategy: simple fixed rate (lowest bit).
+pub const STRATEGY_FIXED_RATE: u32 = 1;
+/// Interest strategy: compound yield (second bit).
+pub const STRATEGY_COMPOUND: u32 = 2;
+/// Interest strategy: performance-based (third bit).
+pub const STRATEGY_PERFORMANCE: u32 = 4;
+/// All valid strategy bits.
+pub const STRATEGY_VALID_MASK: u32 = 0x7;
 
 // ---------------------------------------------------------------------------
 // Error definitions
@@ -209,6 +223,24 @@ pub enum Error {
     ClawbackExpired = 48,
     /// The clawback request was rejected.
     ClawbackRejected = 49,
+
+    // ===== Vault integration errors =====
+    /// The vault address is not approved.
+    VaultNotApproved = 50,
+    /// The vault address is already approved.
+    VaultAlreadyApproved = 51,
+    /// The vault deposit failed.
+    VaultDepositFailed = 52,
+    /// The vault withdrawal failed.
+    VaultWithdrawalFailed = 53,
+    /// Invalid interest strategy bitfield.
+    InvalidInterestStrategy = 54,
+    /// No vault is configured for this stream.
+    NoVaultConfigured = 55,
+    /// Insufficient vaulted shares to claim interest.
+    InsufficientVaultedShares = 56,
+    /// Cannot deposit to vault: stream is closed or paused.
+    CannotDepositToClosedStream = 57,
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +266,13 @@ pub struct Stream {
     pub milestones: Option<Vec<Milestone>>,
     /// If true, the sender may raise clawback requests on this stream.
     pub clawback_enabled: bool,
+    /// Optional vault address where stream tokens can earn yield.
+    pub vault_address: Option<Address>,
+    /// Bitfield representing enabled interest strategies for this stream's vault.
+    /// Bit 0 (0x1): STRATEGY_FIXED_RATE - simple fixed interest rate
+    /// Bit 1 (0x2): STRATEGY_COMPOUND - compound yield interest
+    /// Bit 2 (0x4): STRATEGY_PERFORMANCE - performance-based interest
+    pub interest_strategy: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -595,6 +634,8 @@ impl StellarStreamContract {
         is_soulbound: bool,
         clawback_enabled: bool,
         milestones: Option<Vec<Milestone>>,
+        vault_address: Option<Address>,
+        interest_strategy: u32,
     ) -> Result<u64, Error> {
         sender.require_auth();
         extend_instance_ttl(&env);
@@ -610,6 +651,8 @@ impl StellarStreamContract {
             is_soulbound,
             clawback_enabled,
             milestones,
+            vault_address,
+            interest_strategy,
         )?;
         collect_protocol_fee(&env, &sender, &token, stream_id, total_amount)?;
         Ok(stream_id)
@@ -781,6 +824,12 @@ impl StellarStreamContract {
         if stream.state == STATE_CLOSED {
             return Err(Error::AlreadyCancelled);
         }
+
+        // Withdraw from vault if configured
+        if stream.vault_address.is_some() {
+            let _ = vault::withdraw_from_vault(&env, stream_id, &stream);
+        }
+
         stream.state = STATE_CLOSED;
         save_stream(&env, &stream);
         record_stream_closed(&env, &stream);
@@ -1347,6 +1396,121 @@ impl StellarStreamContract {
     pub fn get_clawback_request(env: Env, clawback_id: u64) -> Option<ClawbackRequest> {
         clawback::get_clawback_request(&env, clawback_id)
     }
+
+    // ===== Vault Integration Entry Points =====
+
+    /// Approve a vault address for use in stream deposits.
+    ///
+    /// Only admins can approve vaults. Once approved, new streams can be created
+    /// with this vault configured, and vaulted deposits can be made.
+    pub fn approve_vault(env: Env, admin: Address, vault_address: Address) -> Result<(), Error> {
+        admin.require_auth();
+        extend_instance_ttl(&env);
+        require_admin(&env, &admin)?;
+        vault::approve_vault(&env, &vault_address)
+    }
+
+    /// Revoke approval for a vault address.
+    ///
+    /// Once revoked, new streams cannot use this vault. Existing streams can
+    /// still claim their accumulated interest.
+    pub fn revoke_vault(env: Env, admin: Address, vault_address: Address) -> Result<(), Error> {
+        admin.require_auth();
+        extend_instance_ttl(&env);
+        require_admin(&env, &admin)?;
+        vault::revoke_vault(&env, &vault_address)
+    }
+
+    /// Deposit stream tokens to the configured vault for yield generation.
+    ///
+    /// # Requirements
+    ///
+    /// - The stream must have a vault configured
+    /// - The vault must be approved
+    /// - The caller must be the stream's receiver
+    /// - The stream must not be closed or paused
+    /// - The interest_strategy must be valid
+    ///
+    /// # Returns
+    ///
+    /// The number of vault shares obtained from the deposit.
+    pub fn deposit_to_vault(
+        env: Env,
+        stream_id: u64,
+        depositor: Address,
+        amount: i128,
+    ) -> Result<i128, Error> {
+        depositor.require_auth();
+        extend_instance_ttl(&env);
+
+        let mut stream = get_stream(&env, stream_id)?;
+
+        if stream.receiver != depositor {
+            return Err(Error::Unauthorized);
+        }
+
+        let shares = vault::deposit_to_vault(&env, stream_id, &mut stream, &depositor, amount)?;
+
+        // Note: We don't save the stream here since vault shares are stored separately
+        // and don't affect the stream's core state
+
+        Ok(shares)
+    }
+
+    /// Claim accumulated interest from a vaulted stream.
+    ///
+    /// # Requirements
+    ///
+    /// - The stream must have a vault configured
+    /// - The caller must be the stream's receiver
+    ///
+    /// # Returns
+    ///
+    /// The amount of accumulated interest claimed. Returns 0 if no interest
+    /// has accumulated yet.
+    pub fn claim_interest(env: Env, stream_id: u64, claimer: Address) -> Result<i128, Error> {
+        claimer.require_auth();
+        extend_instance_ttl(&env);
+
+        let stream = get_stream(&env, stream_id)?;
+        vault::claim_interest(&env, stream_id, &stream, &claimer)
+    }
+
+    /// Query the vault shares held for a stream.
+    ///
+    /// Returns the vault address and share count if the stream has vaulted tokens.
+    pub fn get_vault_shares(env: Env, stream_id: u64) -> Option<(Address, i128)> {
+        let stream = get_stream(&env, stream_id).ok()?;
+
+        let key = DataKey::VaultShares(stream_id);
+        if !env.storage().persistent().has(&key) {
+            return None;
+        }
+
+        let shares = env
+            .storage()
+            .persistent()
+            .get::<_, vault::VaultShareRecord>(&key)?;
+
+        extend_vault_shares_ttl(&env, stream_id);
+
+        Some((shares.vault_address, shares.shares))
+    }
+
+    /// Query accumulated interest for a stream.
+    pub fn get_accumulated_interest(env: Env, stream_id: u64) -> i128 {
+        let interest = env
+            .storage()
+            .persistent()
+            .get::<_, i128>(&DataKey::AccumulatedInterest(stream_id))
+            .unwrap_or(0);
+
+        if interest > 0 {
+            extend_interest_ttl(&env, stream_id);
+        }
+
+        interest
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1371,6 +1535,13 @@ fn withdraw_inner(env: &Env, stream_id: u64, receiver: &Address) -> Result<i128,
         return Ok(0);
     }
 
+    // Withdraw from vault if configured (proportional shares redeemed)
+    let vault_proceeds = if stream.vault_address.is_some() {
+        vault::withdraw_from_vault(env, stream_id, &stream).unwrap_or(0)
+    } else {
+        0
+    };
+
     // Checks-effects-interactions: mutate state BEFORE any external call so a
     // re-entrant token callback cannot double-spend.
     stream.withdrawn_amount = stream
@@ -1382,12 +1553,14 @@ fn withdraw_inner(env: &Env, stream_id: u64, receiver: &Address) -> Result<i128,
 
     // External token transfer (best-effort; a malicious token cannot double-spend
     // because state above is already committed).
-    TokenClient::new(env, &stream.token).transfer(&stream.sender, receiver, &withdrawable);
+    // Include both stream tokens and vault proceeds in the withdrawal
+    let total_amount = withdrawable.checked_add(vault_proceeds).unwrap_or(withdrawable);
+    TokenClient::new(env, &stream.token).transfer(&stream.sender, receiver, &total_amount);
 
     // Record history event
     add_history(env, stream_id, StreamAction::Withdrawn(withdrawable));
 
-    Ok(withdrawable)
+    Ok(total_amount)
 }
 
 fn unlocked_amount(env: &Env, stream: &Stream) -> i128 {
@@ -1512,6 +1685,8 @@ fn create_stream_internal(
     is_soulbound: bool,
     clawback_enabled: bool,
     milestones: Option<Vec<Milestone>>,
+    vault_address: Option<Address>,
+    interest_strategy: u32,
 ) -> Result<u64, Error> {
     if is_contract_paused(env) {
         return Err(Error::ContractPaused);
@@ -1535,6 +1710,17 @@ fn create_stream_internal(
         validate_milestones(&milestones, end_time)?;
     } else if milestones.is_some() {
         return Err(Error::InvalidMilestones);
+    }
+
+    // Validate vault configuration
+    if let Some(vault_addr) = &vault_address {
+        if !vault::is_vault_approved(env, vault_addr) {
+            return Err(Error::VaultNotApproved);
+        }
+        vault::validate_interest_strategy(interest_strategy)?;
+    } else if interest_strategy != 0 {
+        // If no vault, interest_strategy must be 0
+        return Err(Error::InvalidInterestStrategy);
     }
 
     let mut next = env
@@ -1561,6 +1747,8 @@ fn create_stream_internal(
         last_paused_at: 0,
         milestones,
         clawback_enabled,
+        vault_address,
+        interest_strategy,
     };
 
     env.storage().persistent().set(&DataKey::Stream(id), &stream);

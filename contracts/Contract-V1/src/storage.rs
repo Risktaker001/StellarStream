@@ -98,6 +98,16 @@ pub enum DataKey {
     ClawbackCounter,
 
     // -----------------------------------------------------------------------
+    // Vault integration storage (long-term, TTL-extended on access).
+    // -----------------------------------------------------------------------
+    /// Approved vault addresses: `Map<Address, bool>`.
+    ApprovedVaults,
+    /// Vault shares for a stream: `VaultShares` indexed by stream id.
+    VaultShares(u64),
+    /// Accumulated interest for a stream: `i128` indexed by stream id.
+    AccumulatedInterest(u64),
+
+    // -----------------------------------------------------------------------
     // Temporary storage: transaction-scoped, cleared automatically.
     // -----------------------------------------------------------------------
     /// Re-entrancy mutex (true while a protected call is executing).
@@ -196,6 +206,24 @@ pub fn extend_clawback_ttl(env: &Env, clawback_id: u64) {
     env.storage().persistent().extend_ttl(
         &DataKey::Clawback(clawback_id),
         LEDGER_BUMP_SHARED,
+        MAX_TTL_STREAM,
+    );
+}
+
+/// Extend the TTL of a vault shares entry.
+pub fn extend_vault_shares_ttl(env: &Env, stream_id: u64) {
+    env.storage().persistent().extend_ttl(
+        &DataKey::VaultShares(stream_id),
+        LEDGER_BUMP_STREAM,
+        MAX_TTL_STREAM,
+    );
+}
+
+/// Extend the TTL of an accumulated interest entry.
+pub fn extend_interest_ttl(env: &Env, stream_id: u64) {
+    env.storage().persistent().extend_ttl(
+        &DataKey::AccumulatedInterest(stream_id),
+        LEDGER_BUMP_STREAM,
         MAX_TTL_STREAM,
     );
 }
