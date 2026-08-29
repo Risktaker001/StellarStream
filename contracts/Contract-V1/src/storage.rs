@@ -7,8 +7,8 @@
 //!
 //! | Storage type | Data | Lifetime |
 //! |---|---|---|
-//! | `instance()` | [`DataKey::Admin`], [`DataKey::ContractPaused`], [`DataKey::StreamCounter`], [`DataKey::ProposalCounter`], [`DataKey::Roles`], [`DataKey::RestrictedAddresses`], [`DataKey::ActiveStreams`], [`DataKey::TotalTvl`], [`DataKey::LastActivity`], [`DataKey::LastPrune`], [`DataKey::FeeBps`], [`DataKey::Treasury`] | Survives contract upgrades; lives as long as the contract instance |
-//! | `persistent()` | [`DataKey::Stream`], [`DataKey::UserStreams`], [`DataKey::Proposal`], [`DataKey::StreamMetadata`], [`DataKey::StreamHistory`], [`DataKey::MetricBuckets`], [`DataKey::UserSeen`] | Long-term data; must be TTL-extended on access |
+//! | `instance()` | [`DataKey::Admin`], [`DataKey::ContractPaused`], [`DataKey::StreamCounter`], [`DataKey::ProposalCounter`], [`DataKey::Roles`], [`DataKey::RestrictedAddresses`], [`DataKey::ActiveStreams`], [`DataKey::TotalTvl`], [`DataKey::LastActivity`], [`DataKey::LastPrune`], [`DataKey::FeeBps`], [`DataKey::Treasury`], [`DataKey::DisputeCounter`], [`DataKey::DisputeThreshold`] | Survives contract upgrades; lives as long as the contract instance |
+//! | `persistent()` | [`DataKey::Stream`], [`DataKey::UserStreams`], [`DataKey::Proposal`], [`DataKey::StreamMetadata`], [`DataKey::StreamHistory`], [`DataKey::MetricBuckets`], [`DataKey::UserSeen`], [`DataKey::Dispute`], [`DataKey::ActiveDispute`] | Long-term data; must be TTL-extended on access |
 //! | `temporary()` | [`DataKey::ReentrancyLock`] | Transaction-scoped; cleared automatically |
 //!
 //! # TTL management
@@ -70,6 +70,12 @@ pub enum DataKey {
     FeeBps,
     /// Address protocol fees are collected to.
     Treasury,
+    /// Current contract version (incremented on each WASM upgrade).
+    Version,
+    /// Next dispute id to allocate.
+    DisputeCounter,
+    /// Number of arbitrator approvals required to auto-execute a resolution.
+    DisputeThreshold,
 
     // -----------------------------------------------------------------------
     // Persistent storage: long-term data, must be TTL-extended on access.
@@ -116,12 +122,24 @@ pub enum DataKey {
     LastMigratedStreamId,
     /// Flag indicating migration is in progress (temporary lock).
     MigrationInProgress,
+    // Persistent storage: recurring stream records (long-term, TTL-extended on access).
+    // -----------------------------------------------------------------------
+    /// Maps a parent recurring stream to its current child stream id.
+    RecurringChildStreamId(u64),
+    // Persistent storage: dispute records (long-term, TTL-extended on access).
+    // -----------------------------------------------------------------------
+    /// A dispute record by id.
+    Dispute(u64),
+    /// Id of the currently open dispute for a stream, if any.
+    ActiveDispute(u64),
 
     // -----------------------------------------------------------------------
     // Temporary storage: transaction-scoped, cleared automatically.
     // -----------------------------------------------------------------------
     /// Re-entrancy mutex (true while a protected call is executing).
     ReentrancyLock,
+    /// Active flash loan tracking (token address being borrowed).
+    ActiveFlashLoan(Address),
 }
 
 // ---------------------------------------------------------------------------
@@ -157,9 +175,11 @@ pub fn extend_instance_ttl(env: &Env) {
 /// non-existent entry is a host error, so callers must only pass ids of
 /// streams that exist.
 pub fn extend_stream_ttl(env: &Env, stream_id: u64) {
-    env.storage()
-        .persistent()
-        .extend_ttl(&DataKey::Stream(stream_id), LEDGER_BUMP_STREAM, MAX_TTL_STREAM);
+    env.storage().persistent().extend_ttl(
+        &DataKey::Stream(stream_id),
+        LEDGER_BUMP_STREAM,
+        MAX_TTL_STREAM,
+    );
 }
 
 /// Extend the TTL of a proposal's persistent entry.
@@ -225,6 +245,11 @@ pub fn extend_vault_shares_ttl(env: &Env, stream_id: u64) {
     env.storage().persistent().extend_ttl(
         &DataKey::VaultShares(stream_id),
         LEDGER_BUMP_STREAM,
+/// Extend the TTL of a dispute's persistent entry.
+pub fn extend_dispute_ttl(env: &Env, dispute_id: u64) {
+    env.storage().persistent().extend_ttl(
+        &DataKey::Dispute(dispute_id),
+        LEDGER_BUMP_SHARED,
         MAX_TTL_STREAM,
     );
 }
@@ -246,4 +271,11 @@ pub fn bump_stream_versions_ttl(env: &Env) {
 /// Extend the TTL of the migration tracking entry.
 pub fn extend_migration_ttl(env: &Env) {
     bump_persistent_ttl_if_present(env, &DataKey::LastMigratedStreamId);
+}
+/// Extend the TTL of a stream's active-dispute pointer, if the entry exists.
+///
+/// The pointer is removed as soon as the dispute is resolved or closed, so the
+/// entry may legitimately be absent (unlike a live dispute record).
+pub fn extend_active_dispute_ttl_if_present(env: &Env, stream_id: u64) {
+    bump_persistent_ttl_if_present(env, &DataKey::ActiveDispute(stream_id));
 }
